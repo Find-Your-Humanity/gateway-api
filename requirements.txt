@@ -12,3 +12,4 @@ cryptography==41.0.7
 httpx==0.25.2
 # 환경 변수
 python-dotenv==1.0.0 
+PyJWT==2.8.0
