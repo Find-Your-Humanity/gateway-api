@@ -3,12 +3,8 @@ name: Gateway API CI/CD
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'backend/gateway-api/**'
   pull_request:
     branches: [ main ]
-    paths:
-      - 'backend/gateway-api/**'
 
 env:
   REGISTRY: kc-sfacspace.kr-central-2.kcr.dev
@@ -35,7 +31,7 @@ jobs:
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
-        context: ./backend/gateway-api
+        context: .
         push: true
         tags: |
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -82,17 +78,17 @@ jobs:
                       - containerPort: 80
                     env:
                       - name: DB_HOST
-                        value: "your-mysql-host"
+                        value: "team1-db-mysql.captcha.svc.cluster.local"
                       - name: DB_PORT
                         value: "3306"
                       - name: DB_USER
-                        value: "your-db-user"
+                        value: "realcatcha_user"
                       - name: DB_PASSWORD
-                        value: "your-db-password"
+                        value: "realcatcha_password"
                       - name: DB_NAME
                         value: "realcatcha"
                       - name: JWT_SECRET_KEY
-                        value: "your-secret-key"
+                        value: "realcatcha-jwt-secret-key-2024"
                     resources:
                       requests:
                         memory: "256Mi"
@@ -118,7 +114,7 @@ jobs:
           apiVersion: v1
           kind: Service
           metadata:
-            name: gateway-api-service
+            name: gateway-api-backend-service
             namespace: captcha
             labels:
               app: gateway-api
