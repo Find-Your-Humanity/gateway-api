@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [ main ]
 
-env:
-  REGISTRY: kc-sfacspace.kr-central-2.kcr.dev
-  IMAGE_NAME: team1-repo/gateway-api
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -39,13 +35,16 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+    - name: Checkout Kubernetes manifests repository
+      uses: actions/checkout@v4
+      with:
+        repository: Find-Your-Humanity/deploy-manifests
+        path: deploy-manifests
+        token: ${{ secrets.PAT }}
+
     - name: Update deployment manifest
       run: |
         IMAGE_TAG="${{ github.sha }}"
-        
-        # deploy-manifests 저장소 클론
-        git clone https://github.com/Find-Your-Humanity/deploy-manifests.git
-        cd deploy-manifests
         
         # gateway-api 폴더 생성
         mkdir -p gateway-api
@@ -78,13 +77,13 @@ jobs:
                       - containerPort: 80
                     env:
                       - name: DB_HOST
-                        value: "team1-db-mysql.captcha.svc.cluster.local"
+                        value: "az-a.team1-db.1bb3c9ceb1db43928600b93b2a2b1d50.mysql.managed-service.kr-central-2.kakaocloud.com"
                       - name: DB_PORT
-                        value: "3306"
+                        value: "13306"
                       - name: DB_USER
-                        value: "realcatcha_user"
+                        value: "realcatcha"
                       - name: DB_PASSWORD
-                        value: "realcatcha_password"
+                        value: "realcatcha"
                       - name: DB_NAME
                         value: "realcatcha"
                       - name: JWT_SECRET_KEY
@@ -136,4 +135,5 @@ jobs:
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add gateway-api/deployment-gateway-api.yaml
         git commit -m "Update gateway-api image to $IMAGE_TAG" || echo "No changes to commit"
-        git push 
+        git push
+      working-directory: ./deploy-manifests
