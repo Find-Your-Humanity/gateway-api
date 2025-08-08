@@ -89,23 +89,23 @@ def create_user(email: str, username: str, password: str, full_name: str = None)
                 cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
                 if cursor.fetchone():
                     return None
-                
+
                 # 사용자명 중복 확인
                 cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
                 if cursor.fetchone():
                     return None
-                
+
                 # 비밀번호 해싱
                 hashed_password = get_password_hash(password)
-                
-                # 사용자 생성
+
+                # 사용자 생성 (name 컬럼 사용)
                 cursor.execute("""
-                    INSERT INTO users (email, username, password_hash, full_name)
+                    INSERT INTO users (email, username, password_hash, name)
                     VALUES (%s, %s, %s, %s)
                 """, (email, username, hashed_password, full_name))
-                
+
                 user_id = cursor.lastrowid
-                
+
                 return {
                     'id': user_id,
                     'email': email,

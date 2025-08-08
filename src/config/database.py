@@ -40,14 +40,14 @@ def init_database():
                     email VARCHAR(255) UNIQUE NOT NULL,
                     username VARCHAR(100) UNIQUE NOT NULL,
                     password_hash VARCHAR(255) NOT NULL,
-                    full_name VARCHAR(255),
+                    name VARCHAR(255),
                     is_active BOOLEAN DEFAULT TRUE,
                     is_admin BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """)
-            
+
             # 사용자 세션 테이블 생성
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_sessions (
@@ -59,15 +59,15 @@ def init_database():
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """)
-            
+
             # 기본 관리자 계정 생성 (비밀번호: admin123)
             cursor.execute("""
-                INSERT IGNORE INTO users (email, username, password_hash, full_name, is_admin)
-                VALUES ('admin@realcatcha.com', 'admin', 
-                        '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/HS.iK8O', 
+                INSERT IGNORE INTO users (email, username, password_hash, name, is_admin)
+                VALUES ('admin@realcatcha.com', 'admin',
+                        '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/HS.iK8O',
                         '관리자', TRUE)
             """)
-            
+
             print("✅ Gateway API 데이터베이스 초기화 완료!")
 
 def test_connection():
