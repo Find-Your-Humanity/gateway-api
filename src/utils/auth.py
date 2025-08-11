@@ -2,7 +2,7 @@ import os
 import jwt
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from src.config.database import get_db_connection
 
 # 비밀번호 해싱 설정
@@ -57,7 +57,7 @@ def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
                         'id': user['id'],
                         'email': user['email'],
                         'username': user['username'],
-                        'full_name': user['full_name'],
+                        'full_name': user.get('full_name') if isinstance(user, dict) else None,
                         'is_admin': user['is_admin']
                     }
                 return None
@@ -71,7 +71,7 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT id, email, username, full_name, is_admin FROM users WHERE id = %s AND is_active = TRUE",
+                    "SELECT id, email, username, name as full_name, is_admin FROM users WHERE id = %s AND is_active = TRUE",
                     (user_id,)
                 )
                 user = cursor.fetchone()
@@ -80,39 +80,49 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         print(f"사용자 조회 오류: {e}")
         return None
 
-def create_user(email: str, username: str, password: str, full_name: str = None) -> Optional[Dict[str, Any]]:
-    """새 사용자 생성"""
+def create_user(email: str, username: str, password: str, full_name: str = None, contact: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """새 사용자 생성. 성공 시 (user, None) 반환, 실패 시 (None, 'email_exists'|'username_exists'|'contact_exists'|'error') 반환"""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 # 이메일 중복 확인
                 cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
                 if cursor.fetchone():
-                    return None
-
+                    return None, 'email_exists'
+                
                 # 사용자명 중복 확인
                 cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
                 if cursor.fetchone():
-                    return None
-
+                    return None, 'username_exists'
+                
+                # 연락처 중복 확인 (값이 있을 때만)
+                if contact:
+                    cursor.execute("SELECT id FROM users WHERE contact = %s", (contact,))
+                    if cursor.fetchone():
+                        return None, 'contact_exists'
+                
                 # 비밀번호 해싱
                 hashed_password = get_password_hash(password)
-
-                # 사용자 생성 (name 컬럼 사용)
-                cursor.execute("""
-                    INSERT INTO users (email, username, password_hash, name)
-                    VALUES (%s, %s, %s, %s)
-                """, (email, username, hashed_password, full_name))
-
+                
+                # 사용자 생성 (name, contact 컬럼 사용)
+                cursor.execute(
+                    """
+                    INSERT INTO users (email, username, password_hash, name, contact)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (email, username, hashed_password, full_name, contact)
+                )
+                
                 user_id = cursor.lastrowid
-
+                
                 return {
                     'id': user_id,
                     'email': email,
                     'username': username,
                     'full_name': full_name,
+                    'contact': contact,
                     'is_admin': False
-                }
+                }, None
     except Exception as e:
         print(f"사용자 생성 오류: {e}")
-        return None 
+        return None, 'error' 

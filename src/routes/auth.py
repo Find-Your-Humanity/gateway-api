@@ -25,6 +25,7 @@ class SignupRequest(BaseModel):
     username: str
     password: str
     full_name: Optional[str] = None
+    contact: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -98,17 +99,24 @@ async def login(request: LoginRequest):
 async def signup(request: SignupRequest):
     """사용자 회원가입"""
     # 새 사용자 생성
-    user = create_user(
+    user, err = create_user(
         email=request.email,
         username=request.username,
         password=request.password,
-        full_name=request.full_name
+        full_name=request.full_name,
+        contact=request.contact
     )
     
-    if not user:
+    if err:
+        message_map = {
+            'email_exists': '이미 존재하는 이메일입니다.',
+            'username_exists': '이미 존재하는 사용자명입니다.',
+            'contact_exists': '이미 등록된 연락처입니다.',
+            'error': '회원가입 처리 중 오류가 발생했습니다.'
+        }
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="이미 존재하는 이메일 또는 사용자명입니다."
+            detail=message_map.get(err, '회원가입에 실패했습니다.')
         )
     
     # 액세스 토큰 생성
