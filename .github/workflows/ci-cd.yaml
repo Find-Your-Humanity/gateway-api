@@ -85,7 +85,7 @@ jobs:
                       - name: DB_PASSWORD
                         value: "realcatcha"
                       - name: DB_NAME
-                        value: "realcatcha"
+                        value: "captcha"
                       - name: JWT_SECRET_KEY
                         value: "realcatcha-jwt-secret-key-2024"
                     resources:
