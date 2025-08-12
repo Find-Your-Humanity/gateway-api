@@ -6,6 +6,7 @@ import secrets
 import hashlib
 from src.config.database import get_db_connection
 from src.utils.auth import get_password_hash
+from src.utils.email import send_password_reset_email
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -47,9 +48,13 @@ def forgot_password(req: ForgotPasswordRequest):
                     """,
                     (user_id, token_sha256, expires_at),
                 )
+                # 비밀번호 재설정 링크 생성 및 메일 발송
+                frontend_url = os.getenv("FRONTEND_URL", "https://www.realcatcha.com")
+                reset_url = f"{frontend_url}/forgot-password?token={raw_token}"
+                send_password_reset_email(req.email, reset_url)
 
-                # TODO: 실제 이메일 발송 로직 연동. 개발 편의를 위해 응답에 토큰 반환 옵션
-                return {"success": True, "reset_token": raw_token}
+                # 개발 편의: 토큰도 함께 반환
+                return {"success": True, "reset_token": raw_token, "reset_url": reset_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"forgot-password 실패: {e}")
 

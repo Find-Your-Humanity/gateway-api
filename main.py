@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.routes.auth import router as auth_router
 from src.routes.dashboard import router as dashboard_router
-from src.config.database import init_database, test_connection
+import asyncio
+from src.config.database import init_database, test_connection, cleanup_password_reset_tokens
 
 app = FastAPI(title="Real Captcha Gateway API", version="1.0.0")
 
@@ -49,6 +50,25 @@ async def startup_event():
             init_database()
         except Exception as e:
             print(f"⚠️ 데이터베이스 초기화 실패: {e}")
+        # 만료 토큰 정리 1회 수행 및 주기 실행
+        try:
+            deleted = cleanup_password_reset_tokens()
+            if deleted:
+                print(f"🧹 만료/사용 토큰 정리: {deleted}건 삭제")
+        except Exception as e:
+            print(f"⚠️ 토큰 정리 실패: {e}")
+
+        async def periodic_cleanup():
+            while True:
+                try:
+                    deleted = cleanup_password_reset_tokens()
+                    if deleted:
+                        print(f"🧹(주기) 만료/사용 토큰 정리: {deleted}건 삭제")
+                except Exception as e:
+                    print(f"⚠️(주기) 토큰 정리 실패: {e}")
+                await asyncio.sleep(60 * 60 * 6)  # 6시간 간격
+
+        asyncio.create_task(periodic_cleanup())
     else:
         print("❌ 데이터베이스 연결 실패!")
 
