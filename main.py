@@ -1,23 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.routes.auth import router as auth_router
+from src.routes.dashboard import router as dashboard_router
 from src.config.database import init_database, test_connection
 
 app = FastAPI(title="Real Captcha Gateway API", version="1.0.0")
 
 # 인증 라우터 등록
 app.include_router(auth_router)
+app.include_router(dashboard_router)
 
 # CORS 설정 추가
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",        # 개발환경 (React 개발 서버)
-        "http://localhost:3001",        # 대시보드 개발 서버
-        "https://realcatcha.com",       # 프로덕션 프론트엔드 도메인
-        "https://www.realcatcha.com",   # www 서브도메인
-        "https://test.realcatcha.com",  # 테스트 도메인
-        "https://dashboard.realcatcha.com"  # 대시보드 도메인 
+        "https://realcatcha.com",
+        "https://www.realcatcha.com",
+        "https://test.realcatcha.com",
+        "https://dashboard.realcatcha.com"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],

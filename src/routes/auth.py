@@ -156,15 +156,4 @@ async def logout(current_user: dict = Depends(get_current_user)):
     """로그아웃 (클라이언트에서 토큰 삭제)"""
     return {"message": "로그아웃되었습니다."}
 
-# 데이터베이스 초기화 엔드포인트 (개발용)
-@router.post("/init-db")
-async def initialize_database():
-    """데이터베이스 초기화 (개발용)"""
-    try:
-        init_database()
-        return {"message": "데이터베이스가 성공적으로 초기화되었습니다."}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"데이터베이스 초기화 실패: {str(e)}"
-        ) 
+# 개발용 DB 초기화 엔드포인트 제거됨

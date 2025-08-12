@@ -5,11 +5,11 @@ from contextlib import contextmanager
 
 # 데이터베이스 설정
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
+    'host': os.getenv('DB_HOST'),
     'port': int(os.getenv('DB_PORT', 3306)),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', ''),
-    'database': os.getenv('DB_NAME', 'realcatcha'),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASSWORD'),
+    'database': os.getenv('DB_NAME', 'captcha'),
     'charset': 'utf8mb4',
     'cursorclass': DictCursor,
     'autocommit': True
@@ -74,6 +74,31 @@ def init_database():
                     expires_at TIMESTAMP NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+
+            # 에러 코드 집계 (일별)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS error_stats_daily (
+                    date DATE NOT NULL,
+                    status_code INT NOT NULL,
+                    count INT NOT NULL DEFAULT 0,
+                    PRIMARY KEY (date, status_code)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+
+            # 엔드포인트 사용량 (일별)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS endpoint_usage_daily (
+                    date DATE NOT NULL,
+                    endpoint VARCHAR(255) NOT NULL,
+                    requests INT NOT NULL DEFAULT 0,
+                    avg_ms INT NULL,
+                    PRIMARY KEY (date, endpoint)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
