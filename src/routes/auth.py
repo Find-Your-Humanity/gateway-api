@@ -1,159 +1,99 @@
-from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
-from typing import Optional
-from datetime import timedelta
-from src.utils.auth import (
-    authenticate_user, 
-    create_access_token, 
-    verify_token, 
-    get_user_by_id,
-    create_user
-)
-from src.config.database import init_database
+from datetime import datetime, timedelta
+import os
+import secrets
+import hashlib
+from src.config.database import get_db_connection
+from src.utils.auth import get_password_hash
 
-router = APIRouter(prefix="/api/auth", tags=["authentication"])
-security = HTTPBearer()
+router = APIRouter(prefix="/api", tags=["auth"])
 
-# 요청 모델
-class LoginRequest(BaseModel):
-    email: str
-    password: str
 
-class SignupRequest(BaseModel):
+class ForgotPasswordRequest(BaseModel):
     email: EmailStr
-    username: str
-    password: str
-    full_name: Optional[str] = None
-    contact: Optional[str] = None
 
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str
-    user: dict
 
-class UserResponse(BaseModel):
-    id: int
-    email: str
-    username: str
-    full_name: Optional[str]
-    is_admin: bool
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
-# 의존성 함수
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """현재 인증된 사용자 정보 반환"""
-    token = credentials.credentials
-    payload = verify_token(token)
-    
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="유효하지 않은 토큰입니다.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="토큰에 사용자 정보가 없습니다.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    user = get_user_by_id(int(user_id))
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="사용자를 찾을 수 없습니다.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    return user
 
-@router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
-    """사용자 로그인"""
-    user = authenticate_user(request.email, request.password)
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="이메일 또는 비밀번호가 올바르지 않습니다.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # 액세스 토큰 생성
-    access_token_expires = timedelta(minutes=30)
-    access_token = create_access_token(
-        data={"sub": str(user["id"])}, 
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
+RESET_TOKEN_TTL_MINUTES = int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30"))
 
-@router.post("/signup", response_model=TokenResponse)
-async def signup(request: SignupRequest):
-    """사용자 회원가입"""
-    # 새 사용자 생성
-    user, err = create_user(
-        email=request.email,
-        username=request.username,
-        password=request.password,
-        full_name=request.full_name,
-        contact=request.contact
-    )
-    
-    if err:
-        message_map = {
-            'email_exists': '이미 존재하는 이메일입니다.',
-            'username_exists': '이미 존재하는 사용자명입니다.',
-            'contact_exists': '이미 등록된 연락처입니다.',
-            'error': '회원가입 처리 중 오류가 발생했습니다.'
-        }
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=message_map.get(err, '회원가입에 실패했습니다.')
-        )
-    
-    # 액세스 토큰 생성
-    access_token_expires = timedelta(minutes=30)
-    access_token = create_access_token(
-        data={"sub": str(user["id"])}, 
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user
-    }
 
-@router.get("/me", response_model=UserResponse)
-async def get_current_user_info(current_user: dict = Depends(get_current_user)):
-    """현재 사용자 정보 조회"""
-    return current_user
+@router.post("/auth/forgot-password")
+def forgot_password(req: ForgotPasswordRequest):
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM users WHERE email=%s AND is_active=TRUE", (req.email,))
+                user = cursor.fetchone()
+                # 존재하지 않는 이메일이어도 동일 응답 (정보 유출 방지)
+                if not user:
+                    return {"success": True}
 
-@router.post("/refresh")
-async def refresh_token(current_user: dict = Depends(get_current_user)):
-    """토큰 갱신"""
-    access_token_expires = timedelta(minutes=30)
-    access_token = create_access_token(
-        data={"sub": str(current_user["id"])}, 
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
+                user_id = user["id"] if isinstance(user, dict) else user[0]
 
-@router.post("/logout")
-async def logout(current_user: dict = Depends(get_current_user)):
-    """로그아웃 (클라이언트에서 토큰 삭제)"""
-    return {"message": "로그아웃되었습니다."}
+                # 토큰 생성 및 저장 (sha256 해시만 저장)
+                raw_token = secrets.token_urlsafe(32)
+                token_sha256 = hashlib.sha256(raw_token.encode()).hexdigest()
+                expires_at = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_TTL_MINUTES)
 
-# 개발용 DB 초기화 엔드포인트 제거됨
+                cursor.execute(
+                    """
+                    INSERT INTO password_reset_tokens (user_id, token_sha256, expires_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (user_id, token_sha256, expires_at),
+                )
+
+                # TODO: 실제 이메일 발송 로직 연동. 개발 편의를 위해 응답에 토큰 반환 옵션
+                return {"success": True, "reset_token": raw_token}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"forgot-password 실패: {e}")
+
+
+@router.post("/auth/reset-password")
+def reset_password(req: ResetPasswordRequest):
+    if not req.new_password or len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="비밀번호는 8자 이상이어야 합니다.")
+    try:
+        token_sha256 = hashlib.sha256(req.token.encode()).hexdigest()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, user_id, expires_at, used
+                    FROM password_reset_tokens
+                    WHERE token_sha256=%s
+                    """,
+                    (token_sha256,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=400, detail="유효하지 않은 토큰입니다.")
+
+                token_id = row.get("id") if isinstance(row, dict) else row[0]
+                user_id = row.get("user_id") if isinstance(row, dict) else row[1]
+                expires_at = row.get("expires_at") if isinstance(row, dict) else row[2]
+                used = row.get("used") if isinstance(row, dict) else row[3]
+
+                if used:
+                    raise HTTPException(status_code=400, detail="이미 사용된 토큰입니다.")
+                if expires_at <= datetime.utcnow():
+                    raise HTTPException(status_code=400, detail="만료된 토큰입니다.")
+
+                # 사용자 비밀번호 업데이트
+                new_hash = get_password_hash(req.new_password)
+                cursor.execute("UPDATE users SET password_hash=%s WHERE id=%s", (new_hash, user_id))
+
+                # 토큰 사용 처리
+                cursor.execute("UPDATE password_reset_tokens SET used=TRUE WHERE id=%s", (token_id,))
+
+                return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"reset-password 실패: {e}")
+

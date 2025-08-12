@@ -78,52 +78,19 @@ def init_database():
                 """
             )
 
-            # 에러 코드 집계 (일별)
+            # 비밀번호 재설정 토큰 테이블 생성
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS error_stats_daily (
-                    date DATE NOT NULL,
-                    status_code INT NOT NULL,
-                    count INT NOT NULL DEFAULT 0,
-                    PRIMARY KEY (date, status_code)
+                CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    token_sha256 CHAR(64) NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_user_expires (user_id, expires_at),
+                    UNIQUE KEY uniq_token (token_sha256),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
-
-            # 엔드포인트 사용량 (일별)
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS endpoint_usage_daily (
-                    date DATE NOT NULL,
-                    endpoint VARCHAR(255) NOT NULL,
-                    requests INT NOT NULL DEFAULT 0,
-                    avg_ms INT NULL,
-                    PRIMARY KEY (date, endpoint)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                """
-            )
-
-            # 기본 관리자 계정 생성 (비밀번호: admin123)
-            cursor.execute(
-                """
-                INSERT IGNORE INTO users (email, username, password_hash, name, is_admin)
-                VALUES ('admin@realcatcha.com', 'admin',
-                        '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/HS.iK8O',
-                        '관리자', TRUE)
-                """
-            )
-
-            print("✅ Gateway API 데이터베이스 초기화 완료!")
-
-def test_connection():
-    """데이터베이스 연결 테스트"""
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT 1")
-                result = cursor.fetchone()
-                print("✅ Gateway API 데이터베이스 연결 성공!")
-                return True
-    except Exception as e:
-        print(f"❌ Gateway API 데이터베이스 연결 실패: {e}")
-        return False 
