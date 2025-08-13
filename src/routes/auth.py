@@ -66,7 +66,7 @@ def forgot_password(req: ForgotPasswordRequest):
                 )
                 # 비밀번호 재설정 링크 생성 및 메일 발송 (HTML 템플릿 사용)
                 frontend_url = os.getenv("FRONTEND_URL", "https://www.realcatcha.com")
-                reset_url = f"{frontend_url}/forgot-password?token={raw_token}"
+                reset_url = f"{frontend_url}/reset-password?token={raw_token}"
                 send_password_reset_email(req.email, reset_url=reset_url)
 
                 # 개발 편의: 토큰도 함께 반환
