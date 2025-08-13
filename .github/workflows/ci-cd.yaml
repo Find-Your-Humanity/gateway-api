@@ -46,86 +46,86 @@ jobs:
       run: |
         IMAGE_TAG="${{ github.sha }}"
         
-        # gateway-api 폴더 생성
-        mkdir -p gateway-api
+        # # gateway-api 폴더 생성
+        # mkdir -p gateway-api
         
-        # deployment 파일 생성
-        cat > gateway-api/deployment-gateway-api.yaml << 'EOF'
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: gateway-api
-            namespace: captcha
-            labels:
-              app: gateway-api
-          spec:
-            replicas: 2
-            selector:
-              matchLabels:
-                app: gateway-api
-            template:
-              metadata:
-                labels:
-                  app: gateway-api
-              spec:
-                nodeSelector:
-                  pool-name: platform-pool
-                containers:
-                  - name: gateway-api
-                    image: kc-sfacspace.kr-central-2.kcr.dev/team1-repo/gateway-api:IMAGE_TAG_PLACEHOLDER
-                    ports:
-                      - containerPort: 80
-                    env:
-                      - name: DB_HOST
-                        value: "az-a.team1-db.1bb3c9ceb1db43928600b93b2a2b1d50.mysql.managed-service.kr-central-2.kakaocloud.com"
-                      - name: DB_PORT
-                        value: "13306"
-                      - name: DB_USER
-                        value: "realcatcha"
-                      - name: DB_PASSWORD
-                        value: "realcatcha"
-                      - name: DB_NAME
-                        value: "captcha"
-                      - name: JWT_SECRET_KEY
-                        value: "realcatcha-jwt-secret-key-2024"
-                    resources:
-                      requests:
-                        memory: "256Mi"
-                        cpu: "200m"
-                      limits:
-                        memory: "512Mi"
-                        cpu: "500m"
-                    livenessProbe:
-                      httpGet:
-                        path: /health
-                        port: 80
-                      initialDelaySeconds: 30
-                      periodSeconds: 10
-                    readinessProbe:
-                      httpGet:
-                        path: /health
-                        port: 80
-                      initialDelaySeconds: 5
-                      periodSeconds: 5
-                imagePullSecrets:
-                  - name: kcr-pull-secret
-          ---
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: gateway-api-backend-service
-            namespace: captcha
-            labels:
-              app: gateway-api
-          spec:
-            selector:
-              app: gateway-api
-            ports:
-              - protocol: TCP
-                port: 80
-                targetPort: 80
-            type: ClusterIP
-        EOF
+        # # deployment 파일 생성
+        # cat > gateway-api/deployment-gateway-api.yaml << 'EOF'
+        #   apiVersion: apps/v1
+        #   kind: Deployment
+        #   metadata:
+        #     name: gateway-api
+        #     namespace: captcha
+        #     labels:
+        #       app: gateway-api
+        #   spec:
+        #     replicas: 2
+        #     selector:
+        #       matchLabels:
+        #         app: gateway-api
+        #     template:
+        #       metadata:
+        #         labels:
+        #           app: gateway-api
+        #       spec:
+        #         nodeSelector:
+        #           pool-name: platform-pool
+        #         containers:
+        #           - name: gateway-api
+        #             image: kc-sfacspace.kr-central-2.kcr.dev/team1-repo/gateway-api:IMAGE_TAG_PLACEHOLDER
+        #             ports:
+        #               - containerPort: 80
+        #             env:
+        #               - name: DB_HOST
+        #                 value: "az-a.team1-db.1bb3c9ceb1db43928600b93b2a2b1d50.mysql.managed-service.kr-central-2.kakaocloud.com"
+        #               - name: DB_PORT
+        #                 value: "13306"
+        #               - name: DB_USER
+        #                 value: "realcatcha"
+        #               - name: DB_PASSWORD
+        #                 value: "realcatcha"
+        #               - name: DB_NAME
+        #                 value: "captcha"
+        #               - name: JWT_SECRET_KEY
+        #                 value: "realcatcha-jwt-secret-key-2024"
+        #             resources:
+        #               requests:
+        #                 memory: "256Mi"
+        #                 cpu: "200m"
+        #               limits:
+        #                 memory: "512Mi"
+        #                 cpu: "500m"
+        #             livenessProbe:
+        #               httpGet:
+        #                 path: /health
+        #                 port: 80
+        #               initialDelaySeconds: 30
+        #               periodSeconds: 10
+        #             readinessProbe:
+        #               httpGet:
+        #                 path: /health
+        #                 port: 80
+        #               initialDelaySeconds: 5
+        #               periodSeconds: 5
+        #         imagePullSecrets:
+        #           - name: kcr-pull-secret
+        #   ---
+        #   apiVersion: v1
+        #   kind: Service
+        #   metadata:
+        #     name: gateway-api-backend-service
+        #     namespace: captcha
+        #     labels:
+        #       app: gateway-api
+        #   spec:
+        #     selector:
+        #       app: gateway-api
+        #     ports:
+        #       - protocol: TCP
+        #         port: 80
+        #         targetPort: 80
+        #     type: ClusterIP
+        # EOF
         
         # 이미지 태그 교체
         sed -i "s/IMAGE_TAG_PLACEHOLDER/$IMAGE_TAG/g" gateway-api/deployment-gateway-api.yaml
@@ -136,4 +136,4 @@ jobs:
         git add gateway-api/deployment-gateway-api.yaml
         git commit -m "Update gateway-api image to $IMAGE_TAG" || echo "No changes to commit"
         git push
-      working-directory: ./deploy-manifests
+      working-directory: ./deploy-manifests/gateway-api
