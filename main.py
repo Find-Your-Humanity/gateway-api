@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from src.routes.auth import router as auth_router
 from src.routes.dashboard import router as dashboard_router
 import asyncio
@@ -29,6 +31,31 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# 422 검증 오류를 사용자 친화적으로 반환하는 전역 핸들러
+def _translate_validation_error(err: dict) -> dict:
+    loc_parts = [str(x) for x in err.get("loc", []) if x != "body"]
+    field = ".".join(loc_parts) if loc_parts else ""
+    err_type = err.get("type", "")
+    ctx = err.get("ctx") or {}
+    msg = err.get("msg", "")
+
+    if err_type.startswith("value_error.missing"):
+        message = "필수 입력입니다."
+    elif err_type == "type_error.email":
+        message = "올바른 이메일 형식이 아닙니다."
+    elif err_type == "value_error.any_str.min_length":
+        limit = ctx.get("limit_value")
+        message = f"최소 {limit}자 이상 입력해 주세요."
+    else:
+        message = msg
+    return {"field": field, "message": message}
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = [_translate_validation_error(e) for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 @app.get("/")
 def read_root():

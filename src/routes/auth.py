@@ -280,6 +280,15 @@ def signup(req: SignupRequest):
                 raise HTTPException(status_code=409, detail="이미 존재하는 연락처입니다.")
             raise HTTPException(status_code=400, detail="회원가입에 실패했습니다.")
 
+        # 사전 인증을 통과했으므로 사용자 레코드도 즉시 is_verified=TRUE 로 마크
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("UPDATE users SET is_verified=TRUE WHERE id=%s", (user['id'],))
+        except Exception:
+            # 비치명적: 업데이트 실패 시에도 가입은 완료
+            pass
+
         return {"success": True, "user": user}
     except HTTPException:
         raise
