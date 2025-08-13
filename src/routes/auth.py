@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr, Field
+from typing import Optional
 from datetime import datetime, timedelta
 import os
 import secrets
@@ -138,8 +139,8 @@ class SignupRequest(BaseModel):
     email: EmailStr
     username: str = Field(min_length=3)
     password: str = Field(min_length=8)
-    full_name: str | None = None
-    contact: str | None = None
+    full_name: Optional[str] = None
+    contact: Optional[str] = None
 
 
 @router.post("/auth/signup")
