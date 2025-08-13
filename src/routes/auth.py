@@ -33,7 +33,7 @@ class RequestResetCode(BaseModel):
 class VerifyResetCodeRequest(BaseModel):
     email: EmailStr
     code: str = Field(min_length=6, max_length=6)
-    new_password: str = Field(min_length=8)
+    new_password: str
 
 
 RESET_TOKEN_TTL_MINUTES = int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30"))
@@ -77,8 +77,10 @@ def forgot_password(req: ForgotPasswordRequest):
 
 @router.post("/auth/reset-password")
 def reset_password(req: ResetPasswordRequest):
-    if not req.new_password or len(req.new_password) < 8:
-        raise HTTPException(status_code=400, detail="비밀번호는 8자 이상이어야 합니다.")
+    import re
+    strong = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
+    if not req.new_password or not strong.match(req.new_password):
+        raise HTTPException(status_code=400, detail="비밀번호는 영문, 숫자, 특수문자 조합 8자 이상이어야 합니다.")
     try:
         token_sha256 = hashlib.sha256(req.token.encode()).hexdigest()
         with get_db_connection() as conn:
@@ -164,8 +166,10 @@ def request_reset_code(req: RequestResetCode):
 
 @router.post("/auth/reset-password/code")
 def verify_reset_code(req: VerifyResetCodeRequest):
-    if not req.new_password or len(req.new_password) < 8:
-        raise HTTPException(status_code=400, detail="비밀번호는 8자 이상이어야 합니다.")
+    import re
+    strong = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
+    if not req.new_password or not strong.match(req.new_password):
+        raise HTTPException(status_code=400, detail="비밀번호는 영문, 숫자, 특수문자 조합 8자 이상이어야 합니다.")
     try:
         code_sha256 = hashlib.sha256(req.code.encode()).hexdigest()
         with get_db_connection() as conn:
@@ -241,7 +245,7 @@ def login(req: LoginRequest):
 class SignupRequest(BaseModel):
     email: EmailStr
     username: str = Field(min_length=3)
-    password: str = Field(min_length=8)
+    password: str
     full_name: Optional[str] = None
     contact: Optional[str] = None
 
@@ -249,6 +253,12 @@ class SignupRequest(BaseModel):
 @router.post("/auth/signup")
 def signup(req: SignupRequest):
     try:
+        # 비밀번호 강도 검사 (영문/숫자/특수문자 조합 8자 이상)
+        import re
+        strong = re.compile(r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$")
+        if not strong.match(req.password):
+            raise HTTPException(status_code=422, detail=[{"field":"password","message":"비밀번호는 영문, 숫자, 특수문자 조합 8자 이상이어야 합니다."}])
+
         # 사전 조건: 이메일 인증 완료 여부 확인
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
