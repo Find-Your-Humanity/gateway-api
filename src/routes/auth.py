@@ -249,6 +249,21 @@ class SignupRequest(BaseModel):
 @router.post("/auth/signup")
 def signup(req: SignupRequest):
     try:
+        # 사전 조건: 이메일 인증 완료 여부 확인
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id FROM email_verification_codes
+                    WHERE email=%s AND used=TRUE AND expires_at > NOW()
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (req.email,),
+                )
+                verified_row = cursor.fetchone()
+                if not verified_row:
+                    raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
+
         user, err = create_user(
             email=req.email,
             username=req.username,
@@ -265,24 +280,7 @@ def signup(req: SignupRequest):
                 raise HTTPException(status_code=409, detail="이미 존재하는 연락처입니다.")
             raise HTTPException(status_code=400, detail="회원가입에 실패했습니다.")
 
-        # 회원가입 이메일 인증코드 생성/발송
-        from datetime import datetime, timedelta
-        import secrets, hashlib
-        expires_at = datetime.utcnow() + timedelta(minutes=int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30")))
-        code = f"{secrets.randbelow(1000000):06d}"
-        code_sha256 = hashlib.sha256(code.encode()).hexdigest()
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO email_verification_codes (email, code_sha256, expires_at)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (req.email, code_sha256, expires_at),
-                )
-        send_email_verification_code(req.email, code)
-
-        return {"success": True, "user": user, "email_verification": True}
+        return {"success": True, "user": user}
     except HTTPException:
         raise
     except Exception as e:
@@ -329,3 +327,41 @@ def verify_email(req: VerifyEmailRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"verify-email 실패: {e}")
+
+
+class RequestEmailVerification(BaseModel):
+    email: EmailStr
+
+
+@router.post("/auth/verify-email/request")
+def request_email_verification(req: RequestEmailVerification):
+    try:
+        import secrets, hashlib
+        from datetime import datetime, timedelta
+        # 이미 가입된 이메일인지 확인
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM users WHERE email=%s", (req.email,))
+                exists = cursor.fetchone()
+                if exists:
+                    raise HTTPException(status_code=409, detail="이미 존재하는 사용자입니다.")
+
+                # 코드 생성/저장
+                code = f"{secrets.randbelow(1000000):06d}"
+                code_sha256 = hashlib.sha256(code.encode()).hexdigest()
+                expires_at = datetime.utcnow() + timedelta(minutes=int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30")))
+                cursor.execute(
+                    """
+                    INSERT INTO email_verification_codes (email, code_sha256, expires_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (req.email, code_sha256, expires_at),
+                )
+
+        # 메일 발송
+        send_email_verification_code(req.email, code)
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"request-email-verification 실패: {e}")
