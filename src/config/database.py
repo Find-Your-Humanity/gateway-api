@@ -89,20 +89,7 @@ def init_database():
                 """
             )
 
-def cleanup_password_reset_tokens() -> int:
-    """만료되었거나 사용 완료 후 일정 기간 지난 토큰 정리. 삭제된 행 수 반환"""
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                DELETE FROM password_reset_tokens
-                WHERE (used = TRUE AND created_at < NOW() - INTERVAL 1 DAY)
-                   OR (expires_at < NOW() - INTERVAL 1 DAY)
-                """
-            )
-            return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
-
-            # 비밀번호 재설정 토큰 테이블 생성
+            # 비밀번호 재설정 토큰 테이블 (URL 토큰 방식)
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS password_reset_tokens (
@@ -118,3 +105,46 @@ def cleanup_password_reset_tokens() -> int:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+
+            # 비밀번호 재설정 6자리 코드 테이블 (이메일 OTP 방식)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS password_reset_codes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    code_sha256 CHAR(64) NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_user_expires (user_id, expires_at),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+
+def cleanup_password_reset_tokens() -> int:
+    """만료되었거나 사용 완료 후 일정 기간 지난 토큰 정리. 삭제된 행 수 반환"""
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM password_reset_tokens
+                WHERE (used = TRUE AND created_at < NOW() - INTERVAL 1 DAY)
+                   OR (expires_at < NOW() - INTERVAL 1 DAY)
+                """
+            )
+            return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+
+
+def cleanup_password_reset_codes() -> int:
+    """만료되었거나 사용 완료 후 일정 기간 지난 6자리 코드 정리"""
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM password_reset_codes
+                WHERE (used = TRUE AND created_at < NOW() - INTERVAL 1 DAY)
+                   OR (expires_at < NOW() - INTERVAL 1 DAY)
+                """
+            )
+            return cursor.rowcount if hasattr(cursor, 'rowcount') else 0

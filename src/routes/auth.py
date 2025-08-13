@@ -26,6 +26,16 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class RequestResetCode(BaseModel):
+    email: EmailStr
+
+
+class VerifyResetCodeRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=8)
+
+
 RESET_TOKEN_TTL_MINUTES = int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30"))
 
 
@@ -107,6 +117,99 @@ def reset_password(req: ResetPasswordRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"reset-password 실패: {e}")
+
+
+# ===== 6자리 인증코드(OTP) 기반 재설정 =====
+
+@router.post("/auth/forgot-password/code")
+def request_reset_code(req: RequestResetCode):
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM users WHERE email=%s AND is_active=TRUE", (req.email,))
+                user = cursor.fetchone()
+                if not user:
+                    return {"success": True}
+
+                user_id = user["id"] if isinstance(user, dict) else user[0]
+
+                # 6자리 코드 생성(선두 0 허용)
+                code = f"{secrets.randbelow(1000000):06d}"
+                code_sha256 = hashlib.sha256(code.encode()).hexdigest()
+                expires_at = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_TTL_MINUTES)
+
+                # 기존 미사용 코드 무효화(선택)
+                cursor.execute(
+                    "UPDATE password_reset_codes SET used=TRUE WHERE user_id=%s AND used=FALSE",
+                    (user_id,),
+                )
+
+                cursor.execute(
+                    """
+                    INSERT INTO password_reset_codes (user_id, code_sha256, expires_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (user_id, code_sha256, expires_at),
+                )
+
+                # 메일 발송: 코드 전송
+                frontend_url = os.getenv("FRONTEND_URL", "https://www.realcatcha.com")
+                reset_url = f"{frontend_url}/forgot-password"  # 코드 방식은 링크 없이 코드만 전송
+                send_password_reset_email(req.email, f"인증코드: {code}\n{reset_url}")
+
+                return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"request-reset-code 실패: {e}")
+
+
+@router.post("/auth/reset-password/code")
+def verify_reset_code(req: VerifyResetCodeRequest):
+    if not req.new_password or len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="비밀번호는 8자 이상이어야 합니다.")
+    try:
+        code_sha256 = hashlib.sha256(req.code.encode()).hexdigest()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, user_id, expires_at, used
+                    FROM password_reset_codes
+                    WHERE code_sha256=%s
+                    """,
+                    (code_sha256,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=400, detail="유효하지 않은 인증코드입니다.")
+
+                token_id = row.get("id") if isinstance(row, dict) else row[0]
+                user_id = row.get("user_id") if isinstance(row, dict) else row[1]
+                expires_at = row.get("expires_at") if isinstance(row, dict) else row[2]
+                used = row.get("used") if isinstance(row, dict) else row[3]
+
+                if used:
+                    raise HTTPException(status_code=400, detail="이미 사용된 인증코드입니다.")
+                if expires_at <= datetime.utcnow():
+                    raise HTTPException(status_code=400, detail="만료된 인증코드입니다.")
+
+                # 이메일 확인(코드 탈취 방지용, 동일 사용자 매칭)
+                cursor.execute("SELECT id FROM users WHERE id=%s AND email=%s", (user_id, req.email))
+                user_row = cursor.fetchone()
+                if not user_row:
+                    raise HTTPException(status_code=400, detail="인증코드와 이메일이 일치하지 않습니다.")
+
+                # 비밀번호 변경
+                new_hash = get_password_hash(req.new_password)
+                cursor.execute("UPDATE users SET password_hash=%s WHERE id=%s", (new_hash, user_id))
+
+                # 코드 사용 처리
+                cursor.execute("UPDATE password_reset_codes SET used=TRUE WHERE id=%s", (token_id,))
+
+                return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"verify-reset-code 실패: {e}")
 
 
 # ===== 로그인/회원가입 =====
