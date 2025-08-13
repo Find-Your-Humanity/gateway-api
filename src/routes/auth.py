@@ -8,7 +8,7 @@ from src.config.database import get_db_connection
 from src.utils.auth import get_password_hash
 from src.utils.email import send_password_reset_email
 
-router = APIRouter(prefix="/api", tags=["auth"])
+router = APIRouter(tags=["auth"])
 
 
 class ForgotPasswordRequest(BaseModel):
