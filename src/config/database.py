@@ -32,9 +32,12 @@ def get_db_connection():
 def test_connection() -> bool:
     """데이터베이스 연결 가능 여부를 반환"""
     try:
-        with pymysql.connect(**DB_CONFIG) as _:
-            return True
-    except Exception as _:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                return True
+    except Exception as e:
+        print(f"데이터베이스 연결 테스트 실패: {e}")
         return False
 
 def init_database():
@@ -86,6 +89,19 @@ def init_database():
                 """
             )
 
+def cleanup_password_reset_tokens() -> int:
+    """만료되었거나 사용 완료 후 일정 기간 지난 토큰 정리. 삭제된 행 수 반환"""
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM password_reset_tokens
+                WHERE (used = TRUE AND created_at < NOW() - INTERVAL 1 DAY)
+                   OR (expires_at < NOW() - INTERVAL 1 DAY)
+                """
+            )
+            return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+
             # 비밀번호 재설정 토큰 테이블 생성
             cursor.execute(
                 """
@@ -102,16 +118,3 @@ def init_database():
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
-
-def cleanup_password_reset_tokens() -> int:
-    """만료되었거나 사용 완료 후 일정 기간 지난 토큰 정리. 삭제된 행 수 반환"""
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                DELETE FROM password_reset_tokens
-                WHERE (used = TRUE AND created_at < NOW() - INTERVAL 1 DAY)
-                   OR (expires_at < NOW() - INTERVAL 1 DAY)
-                """
-            )
-            return cursor.rowcount if hasattr(cursor, 'rowcount') else 0

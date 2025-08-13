@@ -8,8 +8,8 @@ from src.config.database import init_database, test_connection, cleanup_password
 app = FastAPI(title="Real Captcha Gateway API", version="1.0.0")
 
 # 인증 라우터 등록
-app.include_router(auth_router, prefix="/api")
-app.include_router(dashboard_router, prefix="/api")
+app.include_router(auth_router)
+app.include_router(dashboard_router)
 
 # CORS 설정 추가
 app.add_middleware(

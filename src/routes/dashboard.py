@@ -3,7 +3,7 @@ from typing import List, Literal, Optional
 from datetime import date, timedelta
 from src.config.database import get_db_connection
 
-router = APIRouter(tags=["dashboard"])
+router = APIRouter(prefix="/api", tags=["dashboard"])
 
 
 def _safe_int(value, default=0):
