@@ -1,14 +1,19 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime, timedelta
 import os
 import secrets
 import hashlib
 from src.config.database import get_db_connection
-from src.utils.auth import get_password_hash
+from src.utils.auth import (
+    get_password_hash,
+    authenticate_user,
+    create_access_token,
+    create_user,
+)
 from src.utils.email import send_password_reset_email
 
-router = APIRouter(tags=["auth"])
+router = APIRouter(prefix="/api", tags=["auth"])
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -102,3 +107,62 @@ def reset_password(req: ResetPasswordRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"reset-password 실패: {e}")
 
+
+# ===== 로그인/회원가입 =====
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1)
+
+
+@router.post("/auth/login")
+def login(req: LoginRequest):
+    try:
+        user = authenticate_user(req.email, req.password)
+        if not user:
+            raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
+
+        access_token = create_access_token({"sub": str(user["id"]), "email": user["email"]})
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": user,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"login 실패: {e}")
+
+
+class SignupRequest(BaseModel):
+    email: EmailStr
+    username: str = Field(min_length=3)
+    password: str = Field(min_length=8)
+    full_name: str | None = None
+    contact: str | None = None
+
+
+@router.post("/auth/signup")
+def signup(req: SignupRequest):
+    try:
+        user, err = create_user(
+            email=req.email,
+            username=req.username,
+            password=req.password,
+            full_name=req.full_name,
+            contact=req.contact,
+        )
+        if err:
+            if err == "email_exists":
+                raise HTTPException(status_code=409, detail="이미 존재하는 이메일입니다.")
+            if err == "username_exists":
+                raise HTTPException(status_code=409, detail="이미 존재하는 사용자명입니다.")
+            if err == "contact_exists":
+                raise HTTPException(status_code=409, detail="이미 존재하는 연락처입니다.")
+            raise HTTPException(status_code=400, detail="회원가입에 실패했습니다.")
+
+        return {"success": True, "user": user}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"signup 실패: {e}")
