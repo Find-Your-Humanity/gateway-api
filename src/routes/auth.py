@@ -64,10 +64,10 @@ def forgot_password(req: ForgotPasswordRequest):
                     """,
                     (user_id, token_sha256, expires_at),
                 )
-                # 비밀번호 재설정 링크 생성 및 메일 발송
+                # 비밀번호 재설정 링크 생성 및 메일 발송 (HTML 템플릿 사용)
                 frontend_url = os.getenv("FRONTEND_URL", "https://www.realcatcha.com")
                 reset_url = f"{frontend_url}/forgot-password?token={raw_token}"
-                send_password_reset_email(req.email, reset_url)
+                send_password_reset_email(req.email, reset_url=reset_url)
 
                 # 개발 편의: 토큰도 함께 반환
                 return {"success": True, "reset_token": raw_token, "reset_url": reset_url}
@@ -152,10 +152,10 @@ def request_reset_code(req: RequestResetCode):
                     (user_id, code_sha256, expires_at),
                 )
 
-                # 메일 발송: 코드 전송
+                # 메일 발송: 코드/링크 형식 모두 지원되는 템플릿
                 frontend_url = os.getenv("FRONTEND_URL", "https://www.realcatcha.com")
-                reset_url = f"{frontend_url}/forgot-password"  # 코드 방식은 링크 없이 코드만 전송
-                send_password_reset_email(req.email, f"인증코드: {code}\n{reset_url}")
+                reset_url = f"{frontend_url}/forgot-password"
+                send_password_reset_email(req.email, reset_url=reset_url, code=code)
 
                 return {"success": True}
     except Exception as e:
