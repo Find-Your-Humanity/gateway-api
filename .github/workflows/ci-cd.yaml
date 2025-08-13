@@ -128,7 +128,12 @@ jobs:
         # EOF
         
         # 이미지 태그 교체
-        sed -i "s/IMAGE_TAG_PLACEHOLDER/$IMAGE_TAG/g" gateway-api/deployment-gateway-api.yaml
+        # sed -i "s/IMAGE_TAG_PLACEHOLDER/$IMAGE_TAG/g" gateway-api/deployment-gateway-api.yaml
+        if [ -f "gateway-api/deployment-gateway-api.yaml" ]; then
+          sed -i "s/IMAGE_TAG_PLACEHOLDER/$IMAGE_TAG/g" gateway-api/deployment-gateway-api.yaml
+        else
+          echo "Warning: gateway-api/deployment-gateway-api.yaml file not found"
+        fi
         
         # 변경사항 커밋 및 푸시
         git config user.name "github-actions[bot]"
