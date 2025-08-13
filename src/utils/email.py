@@ -83,3 +83,46 @@ def send_password_reset_email(to_email: str, reset_url: Optional[str] = None, co
 
 
 
+
+def send_email_verification_code(to_email: str, code: str) -> bool:
+    """회원가입 이메일 인증코드 발송 (6자리)."""
+    subject = "[RealCatcha] 회원가입 이메일 인증코드"
+    body = f"안녕하세요,\n\n다음 인증코드를 입력해 회원가입을 완료해 주세요.\n인증코드: {code}\n\n감사합니다."
+    html = f"""
+    <div style="font-family:Inter, Pretendard, Arial; line-height:1.6; color:#111">
+      <p>안녕하세요,</p>
+      <p style="margin:16px 0">아래 인증코드를 입력해 회원가입을 완료해 주세요.</p>
+      <div style="font-size:28px;font-weight:700;letter-spacing:2px;background:#f5f7ff;border:1px solid #dfe4ff;border-radius:8px;padding:16px 24px;display:inline-block">{code}</div>
+      <p style="margin-top:24px;color:#555">감사합니다.<br/>{MAIL_SENDER_NAME}</p>
+    </div>
+    """
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = f"{MAIL_SENDER_NAME} <{MAIL_SENDER_EMAIL}>"
+    msg["To"] = to_email
+    msg.set_content(body)
+    msg.add_alternative(html, subtype="html")
+
+    if not SMTP_HOST:
+        print(f"[DEV] Send mail to {to_email}: {subject}\n{body}")
+        return True
+
+    try:
+        if SMTP_USE_SSL:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+                if SMTP_USERNAME and SMTP_PASSWORD:
+                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                if SMTP_USE_TLS:
+                    server.starttls()
+                if SMTP_USERNAME and SMTP_PASSWORD:
+                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"메일 발송 실패: {e}")
+        return False
+

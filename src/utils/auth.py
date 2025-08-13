@@ -47,7 +47,7 @@ def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT * FROM users WHERE email = %s AND is_active = TRUE",
+                    "SELECT * FROM users WHERE email = %s AND is_active = TRUE AND is_verified = TRUE",
                     (email,)
                 )
                 user = cursor.fetchone()
@@ -107,8 +107,8 @@ def create_user(email: str, username: str, password: str, full_name: str = None,
                 # 사용자 생성 (name, contact 컬럼 사용)
                 cursor.execute(
                     """
-                    INSERT INTO users (email, username, password_hash, name, contact)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO users (email, username, password_hash, name, contact, is_verified)
+                    VALUES (%s, %s, %s, %s, %s, FALSE)
                     """,
                     (email, username, hashed_password, full_name, contact)
                 )
@@ -121,7 +121,8 @@ def create_user(email: str, username: str, password: str, full_name: str = None,
                     'username': username,
                     'full_name': full_name,
                     'contact': contact,
-                    'is_admin': False
+                    'is_admin': False,
+                    'is_verified': False
                 }, None
     except Exception as e:
         print(f"사용자 생성 오류: {e}")

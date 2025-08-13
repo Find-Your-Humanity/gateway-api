@@ -55,6 +55,7 @@ def init_database():
                     name VARCHAR(255),
                     contact VARCHAR(255),
                     is_active BOOLEAN DEFAULT TRUE,
+                    is_verified BOOLEAN DEFAULT FALSE,
                     is_admin BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -74,6 +75,18 @@ def init_database():
                         cursor.execute("ALTER TABLE users ADD COLUMN contact VARCHAR(255) NULL")
                 except Exception as e:
                     print(f"스키마 보정(contact 추가) 실패: {e}")
+
+            # 스키마 보정: is_verified 컬럼 누락 시 추가
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE")
+            except Exception:
+                try:
+                    cursor.execute("SHOW COLUMNS FROM users LIKE 'is_verified'")
+                    col = cursor.fetchone()
+                    if not col:
+                        cursor.execute("ALTER TABLE users ADD COLUMN is_verified BOOLEAN DEFAULT FALSE")
+                except Exception as e:
+                    print(f"스키마 보정(is_verified 추가) 실패: {e}")
 
             # 사용자 세션 테이블 생성
             cursor.execute(
@@ -118,6 +131,21 @@ def init_database():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     INDEX idx_user_expires (user_id, expires_at),
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+
+            # 회원가입 이메일 인증 코드 테이블
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS email_verification_codes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    email VARCHAR(255) NOT NULL,
+                    code_sha256 CHAR(64) NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_email_expires (email, expires_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )

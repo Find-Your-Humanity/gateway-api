@@ -12,7 +12,7 @@ from src.utils.auth import (
     create_access_token,
     create_user,
 )
-from src.utils.email import send_password_reset_email
+from src.utils.email import send_password_reset_email, send_email_verification_code
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -265,8 +265,67 @@ def signup(req: SignupRequest):
                 raise HTTPException(status_code=409, detail="이미 존재하는 연락처입니다.")
             raise HTTPException(status_code=400, detail="회원가입에 실패했습니다.")
 
-        return {"success": True, "user": user}
+        # 회원가입 이메일 인증코드 생성/발송
+        from datetime import datetime, timedelta
+        import secrets, hashlib
+        expires_at = datetime.utcnow() + timedelta(minutes=int(os.getenv("RESET_TOKEN_TTL_MINUTES", "30")))
+        code = f"{secrets.randbelow(1000000):06d}"
+        code_sha256 = hashlib.sha256(code.encode()).hexdigest()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO email_verification_codes (email, code_sha256, expires_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (req.email, code_sha256, expires_at),
+                )
+        send_email_verification_code(req.email, code)
+
+        return {"success": True, "user": user, "email_verification": True}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"signup 실패: {e}")
+
+
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+
+
+@router.post("/auth/verify-email")
+def verify_email(req: VerifyEmailRequest):
+    try:
+        import hashlib
+        code_sha256 = hashlib.sha256(req.code.encode()).hexdigest()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, expires_at, used FROM email_verification_codes
+                    WHERE email=%s AND code_sha256=%s
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (req.email, code_sha256),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=400, detail="유효하지 않은 인증코드입니다.")
+                from datetime import datetime
+                expires_at = row.get("expires_at") if isinstance(row, dict) else row[1]
+                used = row.get("used") if isinstance(row, dict) else row[2]
+                if used:
+                    raise HTTPException(status_code=400, detail="이미 사용된 인증코드입니다.")
+                if expires_at <= datetime.utcnow():
+                    raise HTTPException(status_code=400, detail="만료된 인증코드입니다.")
+
+                # 이메일 인증 완료 처리: users.is_verified=TRUE로 업데이트
+                token_id = row.get("id") if isinstance(row, dict) else row[0]
+                cursor.execute("UPDATE email_verification_codes SET used=TRUE WHERE id=%s", (token_id,))
+                cursor.execute("UPDATE users SET is_verified=TRUE WHERE email=%s", (req.email,))
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"verify-email 실패: {e}")
