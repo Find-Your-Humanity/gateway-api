@@ -130,7 +130,7 @@ jobs:
         # 이미지 태그 교체
         # sed -i "s/IMAGE_TAG_PLACEHOLDER/$IMAGE_TAG/g" gateway-api/deployment-gateway-api.yaml
         if [ -f "gateway-api/deployment-gateway-api.yaml" ]; then
-          sed -i "s/IMAGE_TAG_PLACEHOLDER/$IMAGE_TAG/g" gateway-api/deployment-gateway-api.yaml
+          sed -i -E "s|(image: kc-sfacspace.kr-central-2.kcr.dev/team1-repo/gateway-api:)([^ ]+)|\1$IMAGE_TAG|" deployment-gateway-api.yaml
         else
           echo "Warning: gateway-api/deployment-gateway-api.yaml file not found"
         fi
