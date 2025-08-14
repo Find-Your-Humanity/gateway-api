@@ -150,6 +150,47 @@ def init_database():
                 """
             )
 
+            # ---- 일자별 요청 집계 테이블: request_statistics ----
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS request_statistics (
+                  id INT AUTO_INCREMENT PRIMARY KEY,
+                  date DATE NOT NULL,
+                  total_requests INT NOT NULL DEFAULT 0,
+                  success_count INT NOT NULL DEFAULT 0,
+                  failure_count INT NOT NULL DEFAULT 0,
+                  UNIQUE KEY uniq_date (date)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+
+            # ---- 집계 테이블: error_stats_daily ----
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS error_stats_daily (
+                  id INT AUTO_INCREMENT PRIMARY KEY,
+                  date DATE NOT NULL,
+                  status_code INT NOT NULL,
+                  count INT NOT NULL DEFAULT 0,
+                  UNIQUE KEY uniq_date_status (date, status_code)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+
+            # ---- 집계 테이블: endpoint_usage_daily ----
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS endpoint_usage_daily (
+                  id INT AUTO_INCREMENT PRIMARY KEY,
+                  date DATE NOT NULL,
+                  endpoint VARCHAR(100) NOT NULL,
+                  requests INT NOT NULL DEFAULT 0,
+                  avg_ms INT NULL,
+                  UNIQUE KEY uniq_date_endpoint (date, endpoint)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+
 def cleanup_password_reset_tokens() -> int:
     """만료되었거나 사용 완료 후 일정 기간 지난 토큰 정리. 삭제된 행 수 반환"""
     with get_db_connection() as conn:
@@ -176,3 +217,81 @@ def cleanup_password_reset_codes() -> int:
                 """
             )
             return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+
+
+def aggregate_request_statistics(days: int = 30) -> int:
+    """최근 N일간 request_logs를 집계하여 request_statistics에 업서트한다.
+    반환: 영향받은(업서트된) 행 수(참고용)
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    INSERT INTO request_statistics (date, total_requests, success_count, failure_count)
+                    SELECT DATE(request_time) AS date,
+                           COUNT(*) AS total_requests,
+                           SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success_count,
+                           SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failure_count
+                    FROM request_logs
+                    WHERE request_time >= CURDATE() - INTERVAL {days} DAY
+                    GROUP BY DATE(request_time)
+                    ON DUPLICATE KEY UPDATE
+                      total_requests=VALUES(total_requests),
+                      success_count=VALUES(success_count),
+                      failure_count=VALUES(failure_count)
+                    """
+                )
+                return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+    except Exception as e:
+        print(f"집계 실패(request_statistics): {e}")
+        return 0
+
+
+def aggregate_error_stats_daily(days: int = 30) -> int:
+    """최근 N일간 request_logs를 상태코드별로 집계하여 error_stats_daily에 업서트한다."""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    INSERT INTO error_stats_daily (date, status_code, count)
+                    SELECT DATE(request_time) AS date, status_code, COUNT(*) AS cnt
+                    FROM request_logs
+                    WHERE request_time >= CURDATE() - INTERVAL {days} DAY
+                    GROUP BY DATE(request_time), status_code
+                    ON DUPLICATE KEY UPDATE count=VALUES(count)
+                    """
+                )
+                return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+    except Exception as e:
+        print(f"집계 실패(error_stats_daily): {e}")
+        return 0
+
+
+def aggregate_endpoint_usage_daily(days: int = 30) -> int:
+    """최근 N일간 request_logs를 엔드포인트(여기서는 api_key 기준)별로 집계하여
+    endpoint_usage_daily에 업서트한다. 평균 응답시간은 request_logs.response_time(단위 ms 가정) 사용.
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    INSERT INTO endpoint_usage_daily (date, endpoint, requests, avg_ms)
+                    SELECT DATE(request_time) AS date,
+                           CONCAT('api_key:', COALESCE(api_key, '')) AS endpoint,
+                           COUNT(*) AS requests,
+                           ROUND(AVG(COALESCE(response_time, 0))) AS avg_ms
+                    FROM request_logs
+                    WHERE request_time >= CURDATE() - INTERVAL {days} DAY
+                    GROUP BY DATE(request_time), COALESCE(api_key, '')
+                    ON DUPLICATE KEY UPDATE
+                      requests=VALUES(requests),
+                      avg_ms=VALUES(avg_ms)
+                    """
+                )
+                return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+    except Exception as e:
+        print(f"집계 실패(endpoint_usage_daily): {e}")
+        return 0

@@ -10,6 +10,9 @@ from src.config.database import (
     test_connection,
     cleanup_password_reset_tokens,
     cleanup_password_reset_codes,
+    aggregate_request_statistics,
+    aggregate_error_stats_daily,
+    aggregate_endpoint_usage_daily,
 )
 
 app = FastAPI(title="Real Captcha Gateway API", version="1.0.0")
@@ -102,6 +105,11 @@ async def startup_event():
                     deleted_codes = cleanup_password_reset_codes()
                     if deleted_codes:
                         print(f"🧹(주기) 만료/사용 코드 정리: {deleted_codes}건 삭제")
+                    # 집계 작업 수행
+                    a = aggregate_request_statistics(30)
+                    e = aggregate_error_stats_daily(30)
+                    p = aggregate_endpoint_usage_daily(30)
+                    print(f"📈 집계 업데이트: stats={a}, error={e}, endpoint={p}")
                 except Exception as e:
                     print(f"⚠️(주기) 토큰/코드 정리 실패: {e}")
                 await asyncio.sleep(60 * 60 * 6)  # 6시간 간격

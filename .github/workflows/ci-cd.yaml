@@ -127,7 +127,7 @@ jobs:
         #     type: ClusterIP
         # EOF
         
-        # 이미지 태그 교체
+        # 이미지 태그 교체  
         # sed -i "s/IMAGE_TAG_PLACEHOLDER/$IMAGE_TAG/g" gateway-api/deployment-gateway-api.yaml
         if [ -f "deployment-gateway-api.yaml" ]; then
           sed -i -E "s|(image: kc-sfacspace.kr-central-2.kcr.dev/team1-repo/gateway-api:)([^ ]+)|\1$IMAGE_TAG|" deployment-gateway-api.yaml

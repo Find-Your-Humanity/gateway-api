@@ -107,9 +107,9 @@ def reset_password(req: ResetPasswordRequest):
                 if expires_at <= datetime.utcnow():
                     raise HTTPException(status_code=400, detail="만료된 토큰입니다.")
 
-                # 사용자 비밀번호 업데이트
+                # 사용자 비밀번호 업데이트 + 이메일 소유 증명으로 is_verified 부여
                 new_hash = get_password_hash(req.new_password)
-                cursor.execute("UPDATE users SET password_hash=%s WHERE id=%s", (new_hash, user_id))
+                cursor.execute("UPDATE users SET password_hash=%s, is_verified=TRUE WHERE id=%s", (new_hash, user_id))
 
                 # 토큰 사용 처리
                 cursor.execute("UPDATE password_reset_tokens SET used=TRUE WHERE id=%s", (token_id,))
@@ -202,9 +202,9 @@ def verify_reset_code(req: VerifyResetCodeRequest):
                 if not user_row:
                     raise HTTPException(status_code=400, detail="인증코드와 이메일이 일치하지 않습니다.")
 
-                # 비밀번호 변경
+                # 비밀번호 변경 + 이메일 소유 증명으로 is_verified 부여
                 new_hash = get_password_hash(req.new_password)
-                cursor.execute("UPDATE users SET password_hash=%s WHERE id=%s", (new_hash, user_id))
+                cursor.execute("UPDATE users SET password_hash=%s, is_verified=TRUE WHERE id=%s", (new_hash, user_id))
 
                 # 코드 사용 처리
                 cursor.execute("UPDATE password_reset_codes SET used=TRUE WHERE id=%s", (token_id,))
