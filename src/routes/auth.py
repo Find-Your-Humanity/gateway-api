@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, Request
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from datetime import datetime, timedelta
@@ -11,6 +11,8 @@ from src.utils.auth import (
     authenticate_user,
     create_access_token,
     create_user,
+    verify_token,
+    get_user_by_id,
 )
 from src.utils.email import send_password_reset_email, send_email_verification_code
 
@@ -224,14 +226,27 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/auth/login")
-def login(req: LoginRequest):
+def login(req: LoginRequest, response: Response):
     try:
         user = authenticate_user(req.email, req.password)
         if not user:
             raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
 
         access_token = create_access_token({"sub": str(user["id"]), "email": user["email"]})
+        
+        # 쿠키로 토큰 설정 (부모 도메인 .realcatcha.com)
+        response.set_cookie(
+            key="captcha_token",
+            value=access_token,
+            domain=".realcatcha.com",  # 모든 서브도메인에서 접근 가능
+            httponly=True,  # XSS 방지
+            secure=True,    # HTTPS에서만 전송
+            samesite="lax", # CSRF 방지하면서 일반적인 사이트 간 이동 허용
+            max_age=60 * 60 * 24 * 7  # 7일 (초 단위)
+        )
+        
         return {
+            "success": True,
             "access_token": access_token,
             "token_type": "bearer",
             "user": user,
@@ -384,3 +399,74 @@ def request_email_verification(req: RequestEmailVerification):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"request-email-verification 실패: {e}")
+
+
+@router.post("/auth/logout")
+def logout(response: Response):
+    """로그아웃 - 쿠키 제거"""
+    try:
+        # 쿠키 제거 (같은 도메인/경로로 빈 값과 과거 만료일 설정)
+        response.set_cookie(
+            key="captcha_token",
+            value="",
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            max_age=0  # 즉시 만료
+        )
+        return {"success": True, "message": "로그아웃되었습니다."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"logout 실패: {e}")
+
+
+def get_current_user_from_request(request: Request) -> Optional[Dict[str, Any]]:
+    """Request에서 사용자 정보 추출 (Authorization 헤더 또는 쿠키에서)"""
+    try:
+        # 1. Authorization 헤더에서 토큰 확인
+        auth_header = request.headers.get("authorization")
+        token = None
+        
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+        else:
+            # 2. 쿠키에서 토큰 확인
+            token = request.cookies.get("captcha_token")
+        
+        if not token:
+            return None
+            
+        # 토큰 검증
+        payload = verify_token(token)
+        if not payload:
+            return None
+            
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+            
+        # 사용자 정보 조회
+        user = get_user_by_id(int(user_id))
+        return user
+        
+    except Exception as e:
+        print(f"사용자 인증 오료: {e}")
+        return None
+
+
+@router.get("/auth/me")
+def get_current_user(request: Request):
+    """현재 로그인된 사용자 정보 반환 (쿠키 또는 헤더 토큰 기반)"""
+    try:
+        user = get_current_user_from_request(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+        
+        return {
+            "success": True,
+            "user": user
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"사용자 정보 조회 실패: {e}")
