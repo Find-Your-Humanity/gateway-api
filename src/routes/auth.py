@@ -412,7 +412,7 @@ def logout(response: Response):
             domain=".realcatcha.com",
             httponly=True,
             secure=True,
-            samesite="node",
+            samesite="none",
             max_age=0  # 즉시 만료
         )
         return {"success": True, "message": "로그아웃되었습니다."}
