@@ -241,7 +241,7 @@ def login(req: LoginRequest, response: Response):
             domain=".realcatcha.com",  # 모든 서브도메인에서 접근 가능
             httponly=True,  # XSS 방지
             secure=True,    # HTTPS에서만 전송
-            samesite="lax", # CSRF 방지하면서 일반적인 사이트 간 이동 허용
+            samesite="none", # CSRF 방지하면서 일반적인 사이트 간 이동 허용
             max_age=60 * 60 * 24 * 7  # 7일 (초 단위)
         )
         
@@ -412,7 +412,7 @@ def logout(response: Response):
             domain=".realcatcha.com",
             httponly=True,
             secure=True,
-            samesite="lax",
+            samesite="node",
             max_age=0  # 즉시 만료
         )
         return {"success": True, "message": "로그아웃되었습니다."}
