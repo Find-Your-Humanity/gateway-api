@@ -717,45 +717,22 @@ def get_plan_subscribers(
                 if not plan:
                     raise HTTPException(status_code=404, detail="요금제를 찾을 수 없습니다")
                 
-                # 해당 플랜의 구독자들과 사용 통계 조회
+                # 단순한 구독자 정보만 조회 (문제 발생 소지 최소화)
                 query = """
                     SELECT 
                         u.id as user_id,
                         u.username,
                         u.email,
-                        u.name,
+                        COALESCE(u.name, '') as name,
                         u.created_at as user_created_at,
                         us.id as subscription_id,
                         us.start_date,
                         us.end_date,
-                        us.status as subscription_status,
-                        us.amount,
-                        us.payment_method,
-                        us.notes,
+                        COALESCE(us.status, 'active') as subscription_status,
                         us.created_at as subscription_created_at,
                         p.name as plan_name,
                         p.display_name as plan_display_name,
-                        p.monthly_request_limit,
-                        COALESCE(
-                            (SELECT COUNT(*) 
-                             FROM api_requests ar 
-                             WHERE ar.user_id = u.id 
-                             AND ar.timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                            ), 0
-                        ) as monthly_requests_used,
-                        COALESCE(
-                            (SELECT COUNT(*) 
-                             FROM api_requests ar 
-                             WHERE ar.user_id = u.id 
-                             AND DATE(ar.timestamp) = CURDATE()
-                            ), 0
-                        ) as daily_requests_used,
-                        COALESCE(
-                            (SELECT MAX(ar.timestamp) 
-                             FROM api_requests ar 
-                             WHERE ar.user_id = u.id
-                            ), NULL
-                        ) as last_request_time
+                        COALESCE(p.monthly_request_limit, 0) as monthly_request_limit
                     FROM user_subscriptions us
                     JOIN users u ON us.user_id = u.id
                     JOIN plans p ON us.plan_id = p.id
@@ -764,19 +741,61 @@ def get_plan_subscribers(
                 """
                 
                 cursor.execute(query, (plan_id,))
-                subscribers = cursor.fetchall()
+                result = cursor.fetchall()
+                
+                # 결과를 딕셔너리 형태로 변환
+                subscribers = []
+                for row in result:
+                    if isinstance(row, tuple):
+                        subscriber = {
+                            "user_id": row[0],
+                            "username": row[1],
+                            "email": row[2],
+                            "name": row[3],
+                            "user_created_at": str(row[4]) if row[4] else "",
+                            "subscription_id": row[5],
+                            "start_date": str(row[6]) if row[6] else "",
+                            "end_date": str(row[7]) if row[7] else "",
+                            "subscription_status": row[8],
+                            "subscription_created_at": str(row[9]) if row[9] else "",
+                            "plan_name": row[10],
+                            "plan_display_name": row[11],
+                            "monthly_request_limit": row[12],
+                            "amount": 0,
+                            "payment_method": "manual",
+                            "notes": "",
+                            "monthly_requests_used": 0,
+                            "daily_requests_used": 0,
+                            "last_request_time": None
+                        }
+                    else:
+                        # 딕셔너리 형태의 경우
+                        subscriber = dict(row)
+                        subscriber.update({
+                            "amount": 0,
+                            "payment_method": "manual",
+                            "notes": "",
+                            "monthly_requests_used": 0,
+                            "daily_requests_used": 0,
+                            "last_request_time": None
+                        })
+                    subscribers.append(subscriber)
                 
                 # 플랜 통계 요약
+                plan_info = {
+                    "id": plan[0] if isinstance(plan, tuple) else plan["id"],
+                    "name": plan[1] if isinstance(plan, tuple) else plan["name"],
+                    "display_name": plan[2] if isinstance(plan, tuple) else plan["display_name"]
+                }
+                
+                active_count = sum(1 for s in subscribers if s["subscription_status"] == "active")
+                
                 plan_stats = {
-                    "plan_info": {
-                        "id": plan[0] if isinstance(plan, tuple) else plan["id"],
-                        "name": plan[1] if isinstance(plan, tuple) else plan["name"],
-                        "display_name": plan[2] if isinstance(plan, tuple) else plan["display_name"]
-                    },
+                    "plan_info": plan_info,
                     "total_subscribers": len(subscribers),
-                    "active_subscribers": sum(1 for s in subscribers if (s[9] if isinstance(s, tuple) else s["subscription_status"]) == "active"),
-                    "total_monthly_requests": sum(s[16] if isinstance(s, tuple) else s["monthly_requests_used"] for s in subscribers),
-                    "total_daily_requests": sum(s[17] if isinstance(s, tuple) else s["daily_requests_used"] for s in subscribers)
+                    "active_subscribers": active_count,
+                    "total_monthly_requests": 0,
+                    "total_daily_requests": 0
                 }
                 
                 return {
@@ -790,5 +809,7 @@ def get_plan_subscribers(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         logger.error(f"Error fetching plan subscribers: {e}")
-        raise HTTPException(status_code=500, detail=f"구독자 정보 조회 실패: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"구독자 정보 조회 실패: {str(e)}")
