@@ -829,6 +829,35 @@ def submit_contact_request(
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                # 테이블이 존재하는지 확인하고 없으면 생성
+                cursor.execute("SHOW TABLES LIKE 'contact_requests'")
+                table_exists = cursor.fetchone()
+                
+                if not table_exists:
+                    # 테이블 생성
+                    create_table_query = """
+                        CREATE TABLE contact_requests (
+                            id INT AUTO_INCREMENT PRIMARY KEY,
+                            subject VARCHAR(255) NOT NULL,
+                            contact VARCHAR(100) NOT NULL,
+                            email VARCHAR(255) NOT NULL,
+                            message TEXT NOT NULL,
+                            attachment_filename VARCHAR(255) NULL,
+                            attachment_data LONGBLOB NULL,
+                            status ENUM('unread', 'in_progress', 'resolved') DEFAULT 'unread',
+                            admin_response TEXT NULL,
+                            admin_id INT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            resolved_at TIMESTAMP NULL,
+                            INDEX idx_status (status),
+                            INDEX idx_created_at (created_at),
+                            INDEX idx_email (email)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                    cursor.execute(create_table_query)
+                    conn.commit()
+                
                 # 첨부파일 처리
                 attachment_filename = None
                 attachment_data = None
@@ -853,7 +882,9 @@ def submit_contact_request(
                 return {"success": True, "message": "문의가 성공적으로 접수되었습니다."}
                 
     except Exception as e:
+        import traceback
         logger.error(f"Error submitting contact request: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"문의 제출 실패: {str(e)}")
 
 @router.get("/admin/contact-requests")
@@ -868,6 +899,25 @@ def get_contact_requests(
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                # 먼저 테이블이 존재하는지 확인
+                cursor.execute("SHOW TABLES LIKE 'contact_requests'")
+                table_exists = cursor.fetchone()
+                
+                if not table_exists:
+                    # 테이블이 없으면 빈 결과 반환
+                    return {
+                        "success": True,
+                        "data": {
+                            "data": [],
+                            "pagination": {
+                                "page": page,
+                                "limit": limit,
+                                "total": 0,
+                                "pages": 1
+                            }
+                        }
+                    }
+                
                 # 필터 조건 구성
                 where_conditions = []
                 params = []
@@ -885,7 +935,8 @@ def get_contact_requests(
                     {where_clause}
                 """
                 cursor.execute(count_query, params)
-                total = cursor.fetchone()[0]
+                result = cursor.fetchone()
+                total = result[0] if isinstance(result, tuple) else result["total_count"]
                 
                 # 목록 조회
                 offset = (page - 1) * limit
@@ -896,13 +947,13 @@ def get_contact_requests(
                         cr.contact,
                         cr.email,
                         cr.message,
-                        cr.attachment_filename,
-                        cr.status,
-                        cr.admin_response,
+                        COALESCE(cr.attachment_filename, '') as attachment_filename,
+                        COALESCE(cr.status, 'unread') as status,
+                        COALESCE(cr.admin_response, '') as admin_response,
                         cr.created_at,
                         cr.updated_at,
                         cr.resolved_at,
-                        u.username as admin_username
+                        COALESCE(u.username, '') as admin_username
                     FROM contact_requests cr
                     LEFT JOIN users u ON cr.admin_id = u.id
                     {where_clause}
@@ -950,7 +1001,9 @@ def get_contact_requests(
                 }
                 
     except Exception as e:
+        import traceback
         logger.error(f"Error fetching contact requests: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"문의사항 조회 실패: {str(e)}")
 
 @router.put("/admin/contact-requests/{contact_id}")
@@ -965,6 +1018,13 @@ def update_contact_request(
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                # 테이블 존재 확인
+                cursor.execute("SHOW TABLES LIKE 'contact_requests'")
+                table_exists = cursor.fetchone()
+                
+                if not table_exists:
+                    raise HTTPException(status_code=404, detail="문의 시스템이 아직 초기화되지 않았습니다.")
+                
                 # 문의사항 존재 확인
                 cursor.execute("SELECT id FROM contact_requests WHERE id = %s", (contact_id,))
                 if not cursor.fetchone():
@@ -987,8 +1047,9 @@ def update_contact_request(
                     params.append(admin_response)
                 
                 # 처리한 관리자 기록
-                update_fields.append("admin_id = %s")
-                params.append(admin_user["id"])
+                if admin_user and "id" in admin_user:
+                    update_fields.append("admin_id = %s")
+                    params.append(admin_user["id"])
                 
                 if not update_fields:
                     raise HTTPException(status_code=400, detail="업데이트할 데이터가 없습니다.")
@@ -1003,7 +1064,9 @@ def update_contact_request(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         logger.error(f"Error updating contact request: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"문의사항 업데이트 실패: {str(e)}")
 
 @router.get("/admin/contact-requests/{contact_id}/attachment")
@@ -1016,6 +1079,13 @@ def download_contact_attachment(
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                # 테이블 존재 확인
+                cursor.execute("SHOW TABLES LIKE 'contact_requests'")
+                table_exists = cursor.fetchone()
+                
+                if not table_exists:
+                    raise HTTPException(status_code=404, detail="문의 시스템이 아직 초기화되지 않았습니다.")
+                
                 cursor.execute(
                     "SELECT attachment_filename, attachment_data FROM contact_requests WHERE id = %s",
                     (contact_id,)
@@ -1041,5 +1111,7 @@ def download_contact_attachment(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         logger.error(f"Error downloading attachment: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"첨부파일 다운로드 실패: {str(e)}")
