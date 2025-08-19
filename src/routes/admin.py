@@ -698,3 +698,97 @@ def update_subscription(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"구독 수정 실패: {e}")
+
+# ==================== 요금제별 구독자 상세 정보 API ====================
+
+@router.get("/admin/plans/{plan_id}/subscribers")
+def get_plan_subscribers(
+    plan_id: int,
+    request: Request,
+    admin_user = Depends(require_admin)
+):
+    """특정 요금제의 구독자 상세 정보 조회"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 먼저 플랜이 존재하는지 확인
+                cursor.execute("SELECT id, name, display_name FROM plans WHERE id = %s", (plan_id,))
+                plan = cursor.fetchone()
+                if not plan:
+                    raise HTTPException(status_code=404, detail="요금제를 찾을 수 없습니다")
+                
+                # 해당 플랜의 구독자들과 사용 통계 조회
+                query = """
+                    SELECT 
+                        u.id as user_id,
+                        u.username,
+                        u.email,
+                        u.name,
+                        u.created_at as user_created_at,
+                        us.id as subscription_id,
+                        us.start_date,
+                        us.end_date,
+                        us.status as subscription_status,
+                        us.amount,
+                        us.payment_method,
+                        us.notes,
+                        us.created_at as subscription_created_at,
+                        p.name as plan_name,
+                        p.display_name as plan_display_name,
+                        p.monthly_request_limit,
+                        COALESCE(
+                            (SELECT COUNT(*) 
+                             FROM api_requests ar 
+                             WHERE ar.user_id = u.id 
+                             AND ar.timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                            ), 0
+                        ) as monthly_requests_used,
+                        COALESCE(
+                            (SELECT COUNT(*) 
+                             FROM api_requests ar 
+                             WHERE ar.user_id = u.id 
+                             AND DATE(ar.timestamp) = CURDATE()
+                            ), 0
+                        ) as daily_requests_used,
+                        COALESCE(
+                            (SELECT MAX(ar.timestamp) 
+                             FROM api_requests ar 
+                             WHERE ar.user_id = u.id
+                            ), NULL
+                        ) as last_request_time
+                    FROM user_subscriptions us
+                    JOIN users u ON us.user_id = u.id
+                    JOIN plans p ON us.plan_id = p.id
+                    WHERE us.plan_id = %s 
+                    ORDER BY us.created_at DESC
+                """
+                
+                cursor.execute(query, (plan_id,))
+                subscribers = cursor.fetchall()
+                
+                # 플랜 통계 요약
+                plan_stats = {
+                    "plan_info": {
+                        "id": plan[0] if isinstance(plan, tuple) else plan["id"],
+                        "name": plan[1] if isinstance(plan, tuple) else plan["name"],
+                        "display_name": plan[2] if isinstance(plan, tuple) else plan["display_name"]
+                    },
+                    "total_subscribers": len(subscribers),
+                    "active_subscribers": sum(1 for s in subscribers if (s[9] if isinstance(s, tuple) else s["subscription_status"]) == "active"),
+                    "total_monthly_requests": sum(s[16] if isinstance(s, tuple) else s["monthly_requests_used"] for s in subscribers),
+                    "total_daily_requests": sum(s[17] if isinstance(s, tuple) else s["daily_requests_used"] for s in subscribers)
+                }
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "plan_stats": plan_stats,
+                        "subscribers": subscribers
+                    }
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching plan subscribers: {e}")
+        raise HTTPException(status_code=500, detail=f"구독자 정보 조회 실패: {e}")
