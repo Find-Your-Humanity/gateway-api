@@ -9,7 +9,7 @@ from src.utils.auth import get_password_hash
 from src.routes.auth import get_current_user_from_request
 from fastapi import Request
 
-router = APIRouter()
+router = APIRouter(prefix="/api", tags=["admin"])
 
 # Pydantic 모델들
 class UserResponse(BaseModel):
