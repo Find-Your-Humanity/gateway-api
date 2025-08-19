@@ -1,7 +1,7 @@
 """
 관리자 전용 API 엔드포인트
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Form, File, UploadFile
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from src.config.database import get_db_connection
@@ -813,3 +813,233 @@ def get_plan_subscribers(
         logger.error(f"Error fetching plan subscribers: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"구독자 정보 조회 실패: {str(e)}")
+
+# ==================== 문의사항 관리 API ====================
+
+@router.post("/contact")
+def submit_contact_request(
+    request: Request,
+    subject: str = Form(...),
+    contact: str = Form(...),
+    email: str = Form(...),
+    message: str = Form(...),
+    file: Optional[UploadFile] = File(None)
+):
+    """고객 문의 제출"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 첨부파일 처리
+                attachment_filename = None
+                attachment_data = None
+                
+                if file and file.filename:
+                    attachment_filename = file.filename
+                    attachment_data = file.file.read()
+                
+                # 문의 저장
+                query = """
+                    INSERT INTO contact_requests 
+                    (subject, contact, email, message, attachment_filename, attachment_data, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'unread')
+                """
+                
+                cursor.execute(query, (
+                    subject, contact, email, message, 
+                    attachment_filename, attachment_data
+                ))
+                conn.commit()
+                
+                return {"success": True, "message": "문의가 성공적으로 접수되었습니다."}
+                
+    except Exception as e:
+        logger.error(f"Error submitting contact request: {e}")
+        raise HTTPException(status_code=500, detail=f"문의 제출 실패: {str(e)}")
+
+@router.get("/admin/contact-requests")
+def get_contact_requests(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    admin_user = Depends(require_admin)
+):
+    """관리자용 문의사항 목록 조회"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 필터 조건 구성
+                where_conditions = []
+                params = []
+                
+                if status:
+                    where_conditions.append("cr.status = %s")
+                    params.append(status)
+                
+                where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+                
+                # 총 개수 조회
+                count_query = f"""
+                    SELECT COUNT(*) as total_count 
+                    FROM contact_requests cr
+                    {where_clause}
+                """
+                cursor.execute(count_query, params)
+                total = cursor.fetchone()[0]
+                
+                # 목록 조회
+                offset = (page - 1) * limit
+                query = f"""
+                    SELECT 
+                        cr.id,
+                        cr.subject,
+                        cr.contact,
+                        cr.email,
+                        cr.message,
+                        cr.attachment_filename,
+                        cr.status,
+                        cr.admin_response,
+                        cr.created_at,
+                        cr.updated_at,
+                        cr.resolved_at,
+                        u.username as admin_username
+                    FROM contact_requests cr
+                    LEFT JOIN users u ON cr.admin_id = u.id
+                    {where_clause}
+                    ORDER BY cr.created_at DESC
+                    LIMIT %s OFFSET %s
+                """
+                
+                params.extend([limit, offset])
+                cursor.execute(query, params)
+                contacts = cursor.fetchall()
+                
+                # 결과를 딕셔너리 형태로 변환
+                contact_list = []
+                for row in contacts:
+                    if isinstance(row, tuple):
+                        contact_item = {
+                            "id": row[0],
+                            "subject": row[1],
+                            "contact": row[2],
+                            "email": row[3],
+                            "message": row[4],
+                            "attachment_filename": row[5],
+                            "status": row[6],
+                            "admin_response": row[7],
+                            "created_at": str(row[8]) if row[8] else "",
+                            "updated_at": str(row[9]) if row[9] else "",
+                            "resolved_at": str(row[10]) if row[10] else "",
+                            "admin_username": row[11]
+                        }
+                    else:
+                        contact_item = dict(row)
+                    contact_list.append(contact_item)
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "data": contact_list,
+                        "pagination": {
+                            "page": page,
+                            "limit": limit,
+                            "total": total,
+                            "pages": (total + limit - 1) // limit if total > 0 else 1
+                        }
+                    }
+                }
+                
+    except Exception as e:
+        logger.error(f"Error fetching contact requests: {e}")
+        raise HTTPException(status_code=500, detail=f"문의사항 조회 실패: {str(e)}")
+
+@router.put("/admin/contact-requests/{contact_id}")
+def update_contact_request(
+    contact_id: int,
+    request: Request,
+    status: Optional[str] = Query(None),
+    admin_response: Optional[str] = Query(None),
+    admin_user = Depends(require_admin)
+):
+    """관리자용 문의사항 상태 업데이트"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 문의사항 존재 확인
+                cursor.execute("SELECT id FROM contact_requests WHERE id = %s", (contact_id,))
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=404, detail="문의사항을 찾을 수 없습니다.")
+                
+                # 업데이트할 필드 구성
+                update_fields = []
+                params = []
+                
+                if status:
+                    update_fields.append("status = %s")
+                    params.append(status)
+                    
+                    # resolved 상태일 때 해결 시간 기록
+                    if status == "resolved":
+                        update_fields.append("resolved_at = NOW()")
+                
+                if admin_response is not None:
+                    update_fields.append("admin_response = %s")
+                    params.append(admin_response)
+                
+                # 처리한 관리자 기록
+                update_fields.append("admin_id = %s")
+                params.append(admin_user["id"])
+                
+                if not update_fields:
+                    raise HTTPException(status_code=400, detail="업데이트할 데이터가 없습니다.")
+                
+                params.append(contact_id)
+                query = f"UPDATE contact_requests SET {', '.join(update_fields)} WHERE id = %s"
+                cursor.execute(query, params)
+                conn.commit()
+                
+                return {"success": True, "message": "문의사항이 업데이트되었습니다."}
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating contact request: {e}")
+        raise HTTPException(status_code=500, detail=f"문의사항 업데이트 실패: {str(e)}")
+
+@router.get("/admin/contact-requests/{contact_id}/attachment")
+def download_contact_attachment(
+    contact_id: int,
+    request: Request,
+    admin_user = Depends(require_admin)
+):
+    """첨부파일 다운로드"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT attachment_filename, attachment_data FROM contact_requests WHERE id = %s",
+                    (contact_id,)
+                )
+                result = cursor.fetchone()
+                
+                if not result or not result[0] or not result[1]:
+                    raise HTTPException(status_code=404, detail="첨부파일을 찾을 수 없습니다.")
+                
+                filename, file_data = result
+                
+                from fastapi.responses import Response
+                import mimetypes
+                
+                content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+                
+                return Response(
+                    content=file_data,
+                    media_type=content_type,
+                    headers={"Content-Disposition": f"attachment; filename={filename}"}
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading attachment: {e}")
+        raise HTTPException(status_code=500, detail=f"첨부파일 다운로드 실패: {str(e)}")
