@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from src.config.database import get_db_connection
-from src.utils.auth import get_current_user, hash_password
+from src.utils.auth import get_password_hash
 from src.routes.auth import get_current_user_from_request
 from fastapi import Request
 
@@ -138,7 +138,7 @@ def create_user(
                     raise HTTPException(status_code=400, detail="이미 존재하는 이메일 또는 사용자명입니다.")
                 
                 # 비밀번호 해시화
-                password_hash = hash_password(user_data.password)
+                password_hash = get_password_hash(user_data.password)
                 
                 # 사용자 생성
                 cursor.execute("""
