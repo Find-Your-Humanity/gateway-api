@@ -1302,7 +1302,7 @@ async def get_my_contact_requests(request: Request):
     
     try:
         # 사용자 인증 확인
-        current_user = await get_current_user_from_request(request)
+        current_user = get_current_user_from_request(request)
         if not current_user:
             raise HTTPException(status_code=401, detail="로그인이 필요합니다")
         
