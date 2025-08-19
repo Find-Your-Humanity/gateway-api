@@ -81,10 +81,39 @@ def require_admin(request: Request):
 def test_admin_endpoint(request: Request):
     """관리자 API 테스트 엔드포인트"""
     try:
-        # 기본 응답 테스트
-        return {"success": True, "message": "Admin API is working"}
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 테이블 존재 확인
+                cursor.execute("SHOW TABLES")
+                tables = cursor.fetchall()
+                
+                # users 테이블의 실제 구조 확인
+                cursor.execute("DESCRIBE users")
+                columns = cursor.fetchall()
+                
+                # 실제 데이터 개수 확인
+                cursor.execute("SELECT COUNT(*) FROM users")
+                user_count = cursor.fetchone()[0]
+                
+                # 샘플 데이터 몇 개 확인
+                cursor.execute("SELECT id, email, username, name FROM users LIMIT 3")
+                sample_users = cursor.fetchall()
+                
+                return {
+                    "success": True, 
+                    "message": "DB 연결 성공",
+                    "tables": tables,
+                    "user_table_columns": columns,
+                    "total_users": user_count,
+                    "sample_users": sample_users
+                }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        import traceback
+        return {
+            "success": False, 
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 @router.get("/admin/users")
 def get_users(
