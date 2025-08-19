@@ -877,9 +877,17 @@ def submit_contact_request(
                     subject, contact, email, message, 
                     attachment_filename, attachment_data
                 ))
+                
+                # 생성된 문의 ID 가져오기
+                contact_id = cursor.lastrowid
                 conn.commit()
                 
-                return {"success": True, "message": "문의가 성공적으로 접수되었습니다."}
+                return {
+                    "success": True, 
+                    "message": "문의가 성공적으로 접수되었습니다.",
+                    "contact_id": contact_id,
+                    "status_check_url": f"https://realcatcha.com/contact-status?email={email}&id={contact_id}"
+                }
                 
     except Exception as e:
         import traceback
@@ -1099,13 +1107,22 @@ def download_contact_attachment(
                 
                 from fastapi.responses import Response
                 import mimetypes
+                import urllib.parse
                 
+                # 파일명 URL 인코딩 (한글 파일명 지원)
+                encoded_filename = urllib.parse.quote(filename.encode('utf-8'))
                 content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+                
+                headers = {
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}; filename=\"{filename}\"",
+                    "Content-Type": content_type,
+                    "Content-Length": str(len(file_data))
+                }
                 
                 return Response(
                     content=file_data,
                     media_type=content_type,
-                    headers={"Content-Disposition": f"attachment; filename={filename}"}
+                    headers=headers
                 )
                 
     except HTTPException:
@@ -1115,3 +1132,93 @@ def download_contact_attachment(
         logger.error(f"Error downloading attachment: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"첨부파일 다운로드 실패: {str(e)}")
+
+# ==================== 사용자용 문의 조회 API ====================
+
+@router.get("/contact-status")
+def get_contact_status(
+    request: Request,
+    email: str = Query(..., description="문의 시 입력한 이메일"),
+    contact_id: Optional[int] = Query(None, description="문의 ID (선택사항)")
+):
+    """사용자용 문의 상태 조회 (이메일 기반)"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 테이블 존재 확인
+                cursor.execute("SHOW TABLES LIKE 'contact_requests'")
+                table_exists = cursor.fetchone()
+                
+                if not table_exists:
+                    return {
+                        "success": True,
+                        "data": []
+                    }
+                
+                # 이메일 기반으로 문의 조회
+                where_conditions = ["email = %s"]
+                params = [email]
+                
+                if contact_id:
+                    where_conditions.append("id = %s")
+                    params.append(contact_id)
+                
+                where_clause = " AND ".join(where_conditions)
+                
+                query = f"""
+                    SELECT 
+                        id,
+                        subject,
+                        message,
+                        status,
+                        admin_response,
+                        created_at,
+                        updated_at,
+                        resolved_at
+                    FROM contact_requests 
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                """
+                
+                cursor.execute(query, params)
+                contacts = cursor.fetchall()
+                
+                # 결과를 딕셔너리 형태로 변환
+                contact_list = []
+                for row in contacts:
+                    if isinstance(row, tuple):
+                        contact_item = {
+                            "id": row[0],
+                            "subject": row[1],
+                            "message": row[2],
+                            "status": row[3],
+                            "admin_response": row[4],
+                            "created_at": str(row[5]) if row[5] else "",
+                            "updated_at": str(row[6]) if row[6] else "",
+                            "resolved_at": str(row[7]) if row[7] else "",
+                            "status_display": {
+                                "unread": "접수됨",
+                                "in_progress": "처리 중",
+                                "resolved": "해결됨"
+                            }.get(row[3], row[3])
+                        }
+                    else:
+                        contact_item = dict(row)
+                        contact_item["status_display"] = {
+                            "unread": "접수됨",
+                            "in_progress": "처리 중", 
+                            "resolved": "해결됨"
+                        }.get(contact_item["status"], contact_item["status"])
+                    
+                    contact_list.append(contact_item)
+                
+                return {
+                    "success": True,
+                    "data": contact_list
+                }
+                
+    except Exception as e:
+        import traceback
+        logger.error(f"Error fetching contact status: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"문의 상태 조회 실패: {str(e)}")
