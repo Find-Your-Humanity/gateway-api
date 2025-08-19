@@ -92,8 +92,9 @@ def test_admin_endpoint(request: Request):
                 columns = cursor.fetchall()
                 
                 # 실제 데이터 개수 확인
-                cursor.execute("SELECT COUNT(*) FROM users")
-                user_count = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) as user_count FROM users")
+                result = cursor.fetchone()
+                user_count = result['user_count'] if isinstance(result, dict) else result[0]
                 
                 # 샘플 데이터 몇 개 확인
                 cursor.execute("SELECT id, email, username, name FROM users LIMIT 3")
@@ -141,9 +142,10 @@ def get_users(
                     params = [search_param, search_param, search_param]
                 
                 # 총 개수 조회
-                count_query = f"SELECT COUNT(*) FROM users {where_clause}"
+                count_query = f"SELECT COUNT(*) as total_count FROM users {where_clause}"
                 cursor.execute(count_query, params)
-                total = cursor.fetchone()[0]
+                result = cursor.fetchone()
+                total = result['total_count'] if isinstance(result, dict) else result[0]
                 print(f"총 사용자 수: {total}")
                 
                 # 페이지네이션된 데이터 조회
