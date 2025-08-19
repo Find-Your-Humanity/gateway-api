@@ -1085,6 +1085,8 @@ def download_contact_attachment(
 ):
     """첨부파일 다운로드"""
     try:
+        logger.info(f"Attempting to download attachment for contact_id: {contact_id}")
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 # 테이블 존재 확인
@@ -1092,6 +1094,7 @@ def download_contact_attachment(
                 table_exists = cursor.fetchone()
                 
                 if not table_exists:
+                    logger.error("contact_requests table does not exist")
                     raise HTTPException(status_code=404, detail="문의 시스템이 아직 초기화되지 않았습니다.")
                 
                 cursor.execute(
@@ -1100,23 +1103,52 @@ def download_contact_attachment(
                 )
                 result = cursor.fetchone()
                 
-                if not result or not result[0] or not result[1]:
+                if not result:
+                    logger.error(f"No contact request found with id: {contact_id}")
+                    raise HTTPException(status_code=404, detail="문의사항을 찾을 수 없습니다.")
+                
+                filename = result[0] if isinstance(result, tuple) else result.get("attachment_filename")
+                file_data = result[1] if isinstance(result, tuple) else result.get("attachment_data")
+                
+                logger.info(f"Found attachment: filename={filename}, data_type={type(file_data)}, data_size={len(file_data) if file_data else 0}")
+                
+                if not filename or not file_data:
+                    logger.error(f"Missing attachment data: filename={filename}, has_data={bool(file_data)}")
                     raise HTTPException(status_code=404, detail="첨부파일을 찾을 수 없습니다.")
                 
-                filename, file_data = result
+                # 파일 데이터 타입 확인 및 변환
+                if isinstance(file_data, str):
+                    # 문자열인 경우 바이너리로 변환
+                    file_data = file_data.encode('utf-8')
+                elif not isinstance(file_data, bytes):
+                    # 기타 타입인 경우 바이트로 변환 시도
+                    try:
+                        file_data = bytes(file_data)
+                    except Exception as e:
+                        logger.error(f"Failed to convert file data to bytes: {e}")
+                        raise HTTPException(status_code=500, detail="파일 데이터 변환 실패")
                 
                 from fastapi.responses import Response
                 import mimetypes
                 import urllib.parse
                 
-                # 파일명 URL 인코딩 (한글 파일명 지원)
-                encoded_filename = urllib.parse.quote(filename.encode('utf-8'))
-                content_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+                # 안전한 파일명 처리
+                safe_filename = filename.replace('"', '')
+                
+                # MIME 타입 결정
+                content_type = mimetypes.guess_type(safe_filename)[0] or 'application/octet-stream'
+                
+                # 파일명 인코딩 (한글 지원)
+                try:
+                    encoded_filename = urllib.parse.quote(safe_filename.encode('utf-8'))
+                except Exception:
+                    encoded_filename = urllib.parse.quote(safe_filename)
                 
                 headers = {
-                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}; filename=\"{filename}\"",
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
                     "Content-Type": content_type,
-                    "Content-Length": str(len(file_data))
+                    "Content-Length": str(len(file_data)),
+                    "Cache-Control": "no-cache"
                 }
                 
                 return Response(
@@ -1132,6 +1164,40 @@ def download_contact_attachment(
         logger.error(f"Error downloading attachment: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"첨부파일 다운로드 실패: {str(e)}")
+
+# 테스트용 간단한 다운로드 API
+@router.get("/admin/test-download/{contact_id}")
+def test_download_attachment(
+    contact_id: int,
+    request: Request,
+    admin_user = Depends(require_admin)
+):
+    """테스트용 첨부파일 다운로드"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 간단한 정보만 조회
+                cursor.execute(
+                    "SELECT attachment_filename, LENGTH(attachment_data) as data_length FROM contact_requests WHERE id = %s",
+                    (contact_id,)
+                )
+                result = cursor.fetchone()
+                
+                if not result:
+                    return {"error": "문의사항을 찾을 수 없습니다."}
+                
+                filename = result[0] if isinstance(result, tuple) else result.get("attachment_filename")
+                data_length = result[1] if isinstance(result, tuple) else result.get("data_length")
+                
+                return {
+                    "success": True,
+                    "filename": filename,
+                    "data_length": data_length,
+                    "has_attachment": bool(filename and data_length)
+                }
+                
+    except Exception as e:
+        return {"error": f"조회 실패: {str(e)}"}
 
 # ==================== 사용자용 문의 조회 API ====================
 
