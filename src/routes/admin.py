@@ -1288,3 +1288,91 @@ def get_contact_status(
         logger.error(f"Error fetching contact status: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"문의 상태 조회 실패: {str(e)}")
+
+
+@router.get("/my-contact-requests")
+async def get_my_contact_requests(request: Request):
+    """
+    현재 로그인한 사용자의 문의사항 목록 조회
+    """
+    import traceback
+    
+    try:
+        # 사용자 인증 확인
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise HTTPException(status_code=401, detail="로그인이 필요합니다")
+        
+        user_email = current_user.get("email")
+        if not user_email:
+            raise HTTPException(status_code=400, detail="사용자 이메일 정보가 없습니다")
+        
+        with get_db_connection() as connection:
+            with connection.cursor(dictionary=True) as cursor:
+                # contact_requests 테이블 존재 확인
+                cursor.execute("SHOW TABLES LIKE 'contact_requests'")
+                table_exists = cursor.fetchone()
+                
+                if not table_exists:
+                    logger.info("contact_requests table does not exist, returning empty list")
+                    return {
+                        "success": True,
+                        "contact_requests": []
+                    }
+                
+                # 사용자의 문의사항 조회
+                query = """
+                    SELECT 
+                        id,
+                        subject,
+                        contact,
+                        email,
+                        message,
+                        attachment_filename,
+                        status,
+                        admin_response,
+                        admin_id,
+                        created_at,
+                        updated_at,
+                        resolved_at
+                    FROM contact_requests 
+                    WHERE email = %s
+                    ORDER BY created_at DESC
+                """
+                
+                cursor.execute(query, (user_email,))
+                contacts = cursor.fetchall()
+                
+                # 결과를 리스트 형태로 변환
+                contact_list = []
+                for row in contacts:
+                    contact_item = {
+                        "id": row["id"],
+                        "subject": row["subject"] or "",
+                        "contact": row["contact"] or "",
+                        "email": row["email"] or "",
+                        "message": row["message"] or "",
+                        "attachment_filename": row["attachment_filename"],
+                        "status": row["status"] or "unread",
+                        "admin_response": row["admin_response"],
+                        "admin_id": row["admin_id"],
+                        "created_at": str(row["created_at"]) if row["created_at"] else "",
+                        "updated_at": str(row["updated_at"]) if row["updated_at"] else "",
+                        "resolved_at": str(row["resolved_at"]) if row["resolved_at"] else ""
+                    }
+                    contact_list.append(contact_item)
+                
+                logger.info(f"Found {len(contact_list)} contact requests for user {user_email}")
+                
+                return {
+                    "success": True,
+                    "contact_requests": contact_list
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"Error fetching user contact requests: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"문의사항 조회 실패: {str(e)}")
