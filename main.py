@@ -4,6 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from src.routes.auth import router as auth_router
 from src.routes.dashboard import router as dashboard_router
+from src.routes.admin import router as admin_router
 import asyncio
 from src.config.database import (
     init_database,
@@ -17,9 +18,10 @@ from src.config.database import (
 
 app = FastAPI(title="Real Captcha Gateway API", version="1.0.0")
 
-# 인증 라우터 등록
+# 라우터 등록
 app.include_router(auth_router)
 app.include_router(dashboard_router)
+app.include_router(admin_router)
 
 # CORS 설정 추가
 app.add_middleware(
