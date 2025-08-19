@@ -21,6 +21,11 @@ class UserResponse(BaseModel):
     is_active: bool
     is_admin: bool
     created_at: str
+    # 구독 정보 추가
+    current_plan: Optional[str] = None
+    plan_display_name: Optional[str] = None
+    subscription_status: Optional[str] = None
+    subscription_expires: Optional[str] = None
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -29,6 +34,7 @@ class UserCreate(BaseModel):
     name: Optional[str] = None
     contact: Optional[str] = None
     is_admin: bool = False
+    plan_id: Optional[int] = None  # 초기 플랜 할당
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
@@ -41,21 +47,68 @@ class UserUpdate(BaseModel):
 class PlanResponse(BaseModel):
     id: int
     name: str
-    price: float
-    request_limit: int
+    display_name: str
     description: Optional[str] = None
+    plan_type: str
+    price: float
+    currency: str
+    billing_cycle: str
+    monthly_request_limit: Optional[int] = None
+    concurrent_requests: int
+    features: Optional[dict] = None
+    rate_limit_per_minute: int
+    is_active: bool
+    is_popular: bool
+    sort_order: int
+    # 통계 정보
+    subscriber_count: Optional[int] = None
 
 class PlanCreate(BaseModel):
     name: str
-    price: float
-    request_limit: int
+    display_name: str
     description: Optional[str] = None
+    plan_type: str = 'paid'
+    price: float
+    currency: str = 'KRW'
+    billing_cycle: str = 'monthly'
+    monthly_request_limit: Optional[int] = None
+    concurrent_requests: int = 10
+    features: Optional[dict] = None
+    rate_limit_per_minute: int = 60
+    is_active: bool = True
+    is_popular: bool = False
+    sort_order: int = 0
 
 class PlanUpdate(BaseModel):
     name: Optional[str] = None
-    price: Optional[float] = None
-    request_limit: Optional[int] = None
+    display_name: Optional[str] = None
     description: Optional[str] = None
+    plan_type: Optional[str] = None
+    price: Optional[float] = None
+    currency: Optional[str] = None
+    billing_cycle: Optional[str] = None
+    monthly_request_limit: Optional[int] = None
+    concurrent_requests: Optional[int] = None
+    features: Optional[dict] = None
+    rate_limit_per_minute: Optional[int] = None
+    is_active: Optional[bool] = None
+    is_popular: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+class SubscriptionResponse(BaseModel):
+    id: int
+    user_id: int
+    plan_id: int
+    plan_name: str
+    plan_display_name: str
+    status: str
+    amount: float
+    currency: str
+    payment_method: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    current_usage: int
+    notes: Optional[str] = None
 
 # 관리자 권한 확인 의존성
 def require_admin(request: Request):
@@ -148,12 +201,21 @@ def get_users(
                 total = result['total_count'] if isinstance(result, dict) else result[0]
                 print(f"총 사용자 수: {total}")
                 
-                # 페이지네이션된 데이터 조회
+                # 페이지네이션된 데이터 조회 (구독 정보 포함)
                 offset = (page - 1) * limit
                 data_query = f"""
-                    SELECT id, email, username, name, contact, is_active, is_admin, created_at 
-                    FROM users {where_clause}
-                    ORDER BY created_at DESC
+                    SELECT 
+                        u.id, u.email, u.username, u.name, u.contact, 
+                        u.is_active, u.is_admin, u.created_at,
+                        p.name as current_plan,
+                        p.display_name as plan_display_name,
+                        us.status as subscription_status,
+                        us.end_date as subscription_expires
+                    FROM users u
+                    LEFT JOIN user_subscriptions us ON u.id = us.user_id AND us.status = 'active'
+                    LEFT JOIN plans p ON us.plan_id = p.id
+                    {where_clause}
+                    ORDER BY u.created_at DESC
                     LIMIT %s OFFSET %s
                 """
                 data_params = params + [limit, offset]
@@ -318,11 +380,26 @@ def get_plans(
     request: Request,
     admin_user = Depends(require_admin)
 ):
-    """요금제 목록 조회"""
+    """요금제 목록 조회 (구독자 수 포함)"""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id, name, price, request_limit, description FROM plans ORDER BY price")
+                # 구독자 수 포함한 요금제 목록 조회
+                query = """
+                    SELECT 
+                        p.id, p.name, p.display_name, p.description, p.plan_type,
+                        p.price, p.currency, p.billing_cycle,
+                        p.monthly_request_limit, p.concurrent_requests,
+                        p.features, p.rate_limit_per_minute,
+                        p.is_active, p.is_popular, p.sort_order,
+                        p.created_at, p.updated_at,
+                        COUNT(us.id) as subscriber_count
+                    FROM plans p
+                    LEFT JOIN user_subscriptions us ON p.id = us.plan_id AND us.status = 'active'
+                    GROUP BY p.id
+                    ORDER BY p.sort_order, p.id
+                """
+                cursor.execute(query)
                 plans = cursor.fetchall()
                 return {"success": True, "data": plans}
     except Exception as e:
@@ -431,6 +508,71 @@ def delete_plan(
 
 # ==================== 사용자 구독 관리 API ====================
 
+@router.get("/admin/subscriptions")
+def get_subscriptions(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    admin_user = Depends(require_admin)
+):
+    """전체 구독 목록 조회"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                where_clause = "WHERE 1=1"
+                params = []
+                
+                if status:
+                    where_clause += " AND us.status = %s"
+                    params.append(status)
+                
+                # 총 개수 조회
+                count_query = f"""
+                    SELECT COUNT(*) as total_count 
+                    FROM user_subscriptions us
+                    JOIN users u ON us.user_id = u.id
+                    JOIN plans p ON us.plan_id = p.id
+                    {where_clause}
+                """
+                cursor.execute(count_query, params)
+                result = cursor.fetchone()
+                total = result['total_count'] if isinstance(result, dict) else result[0]
+                
+                # 페이지네이션된 데이터 조회
+                offset = (page - 1) * limit
+                query = f"""
+                    SELECT 
+                        us.id, us.user_id, us.plan_id, us.status, us.amount, us.currency,
+                        us.payment_method, us.start_date, us.end_date, us.current_usage, us.notes,
+                        u.username, u.email,
+                        p.name as plan_name, p.display_name as plan_display_name
+                    FROM user_subscriptions us
+                    JOIN users u ON us.user_id = u.id
+                    JOIN plans p ON us.plan_id = p.id
+                    {where_clause}
+                    ORDER BY us.created_at DESC
+                    LIMIT %s OFFSET %s
+                """
+                params.extend([limit, offset])
+                cursor.execute(query, params)
+                subscriptions = cursor.fetchall()
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "data": subscriptions,
+                        "pagination": {
+                            "page": page,
+                            "limit": limit,
+                            "total": total,
+                            "pages": (total + limit - 1) // limit if total > 0 else 1
+                        }
+                    }
+                }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"구독 목록 조회 실패: {e}")
+
 @router.get("/admin/users/{user_id}/subscription")
 def get_user_subscription(
     user_id: int,
@@ -442,11 +584,14 @@ def get_user_subscription(
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 query = """
-                    SELECT us.id, us.start_date, us.end_date, p.id as plan_id, p.name as plan_name, 
-                           p.price, p.request_limit, p.description
+                    SELECT 
+                        us.id, us.user_id, us.plan_id, us.status, us.amount, us.currency,
+                        us.payment_method, us.start_date, us.end_date, us.current_usage, us.notes,
+                        p.name as plan_name, p.display_name as plan_display_name,
+                        p.monthly_request_limit, p.price
                     FROM user_subscriptions us
                     JOIN plans p ON us.plan_id = p.id
-                    WHERE us.user_id = %s AND (us.end_date IS NULL OR us.end_date >= CURDATE())
+                    WHERE us.user_id = %s AND us.status = 'active'
                     ORDER BY us.start_date DESC
                     LIMIT 1
                 """
@@ -463,8 +608,8 @@ def get_user_subscription(
 @router.post("/admin/users/{user_id}/subscription")
 def assign_plan_to_user(
     user_id: int,
-    plan_id: int,
     request: Request,
+    plan_id: int = Query(..., description="할당할 플랜 ID"),
     admin_user = Depends(require_admin)
 ):
     """사용자에게 요금제 할당"""
@@ -476,22 +621,27 @@ def assign_plan_to_user(
                 if not cursor.fetchone():
                     raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
                 
-                cursor.execute("SELECT id FROM plans WHERE id = %s", (plan_id,))
-                if not cursor.fetchone():
+                cursor.execute("SELECT id, price FROM plans WHERE id = %s", (plan_id,))
+                plan = cursor.fetchone()
+                if not plan:
                     raise HTTPException(status_code=404, detail="요금제를 찾을 수 없습니다.")
                 
                 # 기존 활성 구독 종료
                 cursor.execute("""
                     UPDATE user_subscriptions 
-                    SET end_date = CURDATE() 
-                    WHERE user_id = %s AND (end_date IS NULL OR end_date >= CURDATE())
+                    SET status = 'cancelled', end_date = CURDATE() 
+                    WHERE user_id = %s AND status = 'active'
                 """, (user_id,))
                 
                 # 새 구독 생성
+                plan_price = plan['price'] if isinstance(plan, dict) else plan[1]
                 cursor.execute("""
-                    INSERT INTO user_subscriptions (user_id, plan_id, start_date)
-                    VALUES (%s, %s, CURDATE())
-                """, (user_id, plan_id))
+                    INSERT INTO user_subscriptions (
+                        user_id, plan_id, start_date, status, amount, 
+                        payment_method, notes
+                    )
+                    VALUES (%s, %s, CURDATE(), 'active', %s, 'manual', '관리자가 할당한 플랜')
+                """, (user_id, plan_id, plan_price))
                 
                 conn.commit()
                 
@@ -500,3 +650,51 @@ def assign_plan_to_user(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"요금제 할당 실패: {e}")
+
+@router.put("/admin/subscriptions/{subscription_id}")
+def update_subscription(
+    subscription_id: int,
+    request: Request,
+    status: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    notes: Optional[str] = Query(None),
+    admin_user = Depends(require_admin)
+):
+    """구독 정보 수정"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 구독 존재 확인
+                cursor.execute("SELECT id FROM user_subscriptions WHERE id = %s", (subscription_id,))
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=404, detail="구독을 찾을 수 없습니다.")
+                
+                # 업데이트할 필드 구성
+                update_fields = []
+                params = []
+                
+                if status:
+                    update_fields.append("status = %s")
+                    params.append(status)
+                
+                if end_date:
+                    update_fields.append("end_date = %s")
+                    params.append(end_date)
+                
+                if notes is not None:
+                    update_fields.append("notes = %s")
+                    params.append(notes)
+                
+                if not update_fields:
+                    raise HTTPException(status_code=400, detail="업데이트할 데이터가 없습니다.")
+                
+                params.append(subscription_id)
+                query = f"UPDATE user_subscriptions SET {', '.join(update_fields)} WHERE id = %s"
+                cursor.execute(query, params)
+                conn.commit()
+                
+                return {"success": True, "message": "구독 정보가 수정되었습니다."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"구독 수정 실패: {e}")
