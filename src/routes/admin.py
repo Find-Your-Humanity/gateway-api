@@ -60,18 +60,24 @@ class PlanUpdate(BaseModel):
 # 관리자 권한 확인 의존성
 def require_admin(request: Request):
     """관리자 권한이 필요한 엔드포인트용 의존성"""
-    user = get_current_user_from_request(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="인증이 필요합니다.")
-    
-    if not (user.get('is_admin') == 1 or user.get('is_admin') == True):
-        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
-    
-    return user
+    try:
+        user = get_current_user_from_request(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+        
+        if not (user.get('is_admin') == 1 or user.get('is_admin') == True):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"require_admin 오류: {e}")
+        raise HTTPException(status_code=401, detail="인증 확인 중 오류가 발생했습니다.")
 
 # ==================== 사용자 관리 API ====================
 
-@router.get("/admin/users", response_model=List[UserResponse])
+@router.get("/admin/users")
 def get_users(
     request: Request,
     page: int = Query(1, ge=1),
@@ -110,18 +116,20 @@ def get_users(
                 
                 return {
                     "success": True,
-                    "data": users,
-                    "pagination": {
-                        "page": page,
-                        "limit": limit,
-                        "total": total,
-                        "pages": (total + limit - 1) // limit
+                    "data": {
+                        "data": users,
+                        "pagination": {
+                            "page": page,
+                            "limit": limit,
+                            "total": total,
+                            "pages": (total + limit - 1) // limit
+                        }
                     }
                 }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"사용자 목록 조회 실패: {e}")
 
-@router.post("/admin/users", response_model=UserResponse)
+@router.post("/admin/users")
 def create_user(
     user_data: UserCreate,
     request: Request,
@@ -142,8 +150,8 @@ def create_user(
                 
                 # 사용자 생성
                 cursor.execute("""
-                    INSERT INTO users (email, username, password_hash, name, contact, is_admin, is_verified)
-                    VALUES (%s, %s, %s, %s, %s, %s, TRUE)
+                    INSERT INTO users (email, username, password_hash, name, contact, is_admin)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                 """, (user_data.email, user_data.username, password_hash, 
                      user_data.name, user_data.contact, user_data.is_admin))
                 
@@ -240,7 +248,7 @@ def delete_user(
 
 # ==================== 요금제 관리 API ====================
 
-@router.get("/admin/plans", response_model=List[PlanResponse])
+@router.get("/admin/plans")
 def get_plans(
     request: Request,
     admin_user = Depends(require_admin)
@@ -255,7 +263,7 @@ def get_plans(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"요금제 목록 조회 실패: {e}")
 
-@router.post("/admin/plans", response_model=PlanResponse)
+@router.post("/admin/plans")
 def create_plan(
     plan_data: PlanCreate,
     request: Request,
