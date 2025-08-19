@@ -8,6 +8,9 @@ from src.config.database import get_db_connection
 from src.utils.auth import get_password_hash
 from src.routes.auth import get_current_user_from_request
 from fastapi import Request
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["admin"])
 
