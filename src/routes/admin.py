@@ -1311,7 +1311,7 @@ async def get_my_contact_requests(request: Request):
             raise HTTPException(status_code=400, detail="사용자 이메일 정보가 없습니다")
         
         with get_db_connection() as connection:
-            with connection.cursor(dictionary=True) as cursor:
+            with connection.cursor() as cursor:
                 # contact_requests 테이블 존재 확인
                 cursor.execute("SHOW TABLES LIKE 'contact_requests'")
                 table_exists = cursor.fetchone()
@@ -1346,23 +1346,40 @@ async def get_my_contact_requests(request: Request):
                 cursor.execute(query, (user_email,))
                 contacts = cursor.fetchall()
                 
-                # 결과를 리스트 형태로 변환
+                # 결과를 리스트 형태로 변환 (튜플 기반)
                 contact_list = []
                 for row in contacts:
-                    contact_item = {
-                        "id": row["id"],
-                        "subject": row["subject"] or "",
-                        "contact": row["contact"] or "",
-                        "email": row["email"] or "",
-                        "message": row["message"] or "",
-                        "attachment_filename": row["attachment_filename"],
-                        "status": row["status"] or "unread",
-                        "admin_response": row["admin_response"],
-                        "admin_id": row["admin_id"],
-                        "created_at": str(row["created_at"]) if row["created_at"] else "",
-                        "updated_at": str(row["updated_at"]) if row["updated_at"] else "",
-                        "resolved_at": str(row["resolved_at"]) if row["resolved_at"] else ""
-                    }
+                    if isinstance(row, tuple):
+                        contact_item = {
+                            "id": row[0],
+                            "subject": row[1] or "",
+                            "contact": row[2] or "",
+                            "email": row[3] or "",
+                            "message": row[4] or "",
+                            "attachment_filename": row[5],
+                            "status": row[6] or "unread",
+                            "admin_response": row[7],
+                            "admin_id": row[8],
+                            "created_at": str(row[9]) if row[9] else "",
+                            "updated_at": str(row[10]) if row[10] else "",
+                            "resolved_at": str(row[11]) if row[11] else ""
+                        }
+                    else:
+                        # 딕셔너리 형태인 경우 (일부 환경에서)
+                        contact_item = {
+                            "id": row["id"],
+                            "subject": row["subject"] or "",
+                            "contact": row["contact"] or "",
+                            "email": row["email"] or "",
+                            "message": row["message"] or "",
+                            "attachment_filename": row["attachment_filename"],
+                            "status": row["status"] or "unread",
+                            "admin_response": row["admin_response"],
+                            "admin_id": row["admin_id"],
+                            "created_at": str(row["created_at"]) if row["created_at"] else "",
+                            "updated_at": str(row["updated_at"]) if row["updated_at"] else "",
+                            "resolved_at": str(row["resolved_at"]) if row["resolved_at"] else ""
+                        }
                     contact_list.append(contact_item)
                 
                 logger.info(f"Found {len(contact_list)} contact requests for user {user_email}")
