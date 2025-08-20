@@ -913,6 +913,9 @@ def submit_contact_request(
                     "status_check_url": f"https://realcatcha.com/contact-status?email={user_email}&id={contact_id}"
                 }
                 
+    except HTTPException:
+        # HTTPException은 그대로 전달
+        raise
     except Exception as e:
         import traceback
         logger.error(f"Error submitting contact request: {e}")
