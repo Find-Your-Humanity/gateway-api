@@ -242,12 +242,14 @@ def login(req: LoginRequest, response: Response):
             expires_delta=timedelta(minutes=30)
         )
         
+        # TODO: Refresh Token 기능은 DB 환경 설정 후 활성화
         # Refresh Token 생성 (14일 유효기간)
-        device_info = request.headers.get("user-agent", "Unknown")
-        refresh_token = create_refresh_token(user["id"], device_info)
-        
-        if not refresh_token:
-            raise HTTPException(status_code=500, detail="Refresh Token 생성 실패")
+        refresh_token = None
+        try:
+            device_info = request.headers.get("user-agent", "Unknown")
+            refresh_token = create_refresh_token(user["id"], device_info)
+        except Exception as e:
+            print(f"Refresh Token 생성 실패 (임시 무시): {e}")
         
         # Access Token을 쿠키로 설정 (30분)
         response.set_cookie(
@@ -260,25 +262,30 @@ def login(req: LoginRequest, response: Response):
             max_age=60 * 30  # 30분 (초 단위)
         )
         
-        # Refresh Token을 별도 쿠키로 설정 (14일)
-        response.set_cookie(
-            key="captcha_refresh_token",
-            value=refresh_token,
-            domain=".realcatcha.com",
-            httponly=True,
-            secure=True,
-            samesite="none",
-            max_age=60 * 60 * 24 * 14  # 14일 (초 단위)
-        )
+        # Refresh Token을 별도 쿠키로 설정 (14일) - 생성된 경우만
+        if refresh_token:
+            response.set_cookie(
+                key="captcha_refresh_token",
+                value=refresh_token,
+                domain=".realcatcha.com",
+                httponly=True,
+                secure=True,
+                samesite="none",
+                max_age=60 * 60 * 24 * 14  # 14일 (초 단위)
+            )
         
-        return {
+        result = {
             "success": True,
             "access_token": access_token,
-            "refresh_token": refresh_token,
             "token_type": "bearer",
             "expires_in": 30 * 60,  # 30분 (초 단위)
             "user": user,
         }
+        
+        if refresh_token:
+            result["refresh_token"] = refresh_token
+            
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -295,7 +302,12 @@ def refresh_access_token(request: Request, response: Response):
             raise HTTPException(status_code=401, detail="Refresh Token이 없습니다.")
         
         # Refresh Token 검증 및 사용자 정보 조회
-        user = verify_refresh_token(refresh_token)
+        try:
+            user = verify_refresh_token(refresh_token)
+        except Exception as e:
+            print(f"Refresh Token 검증 오류: {e}")
+            raise HTTPException(status_code=401, detail="Refresh Token 기능이 비활성화되어 있습니다.")
+            
         if not user:
             raise HTTPException(status_code=401, detail="유효하지 않거나 만료된 Refresh Token입니다.")
         
@@ -477,10 +489,13 @@ def request_email_verification(req: RequestEmailVerification):
 def logout(request: Request, response: Response):
     """로그아웃 - 쿠키 제거 및 Refresh Token 무효화"""
     try:
-        # Refresh Token 무효화
+        # Refresh Token 무효화 (DB 연결 가능한 경우만)
         refresh_token = request.cookies.get("captcha_refresh_token")
         if refresh_token:
-            revoke_refresh_token(refresh_token)
+            try:
+                revoke_refresh_token(refresh_token)
+            except Exception as e:
+                print(f"Refresh Token 무효화 실패 (무시): {e}")
         
         # Access Token 쿠키 제거
         response.set_cookie(
