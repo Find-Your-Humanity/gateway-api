@@ -14,7 +14,7 @@ async def exchange_code_for_token(code: str) -> Optional[Dict[str, Any]]:
                     'client_secret': GOOGLE_CLIENT_SECRET,
                     'code': code,
                     'grant_type': 'authorization_code',
-                    'redirect_uri': 'https://gateway.realcatcha.com/api/auth/google/callback'
+                    'redirect_uri': 'https://realcatcha.com/auth/google/callback'
                 }
             )
             
