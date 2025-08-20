@@ -75,7 +75,19 @@ def create_or_update_user_from_google(google_user: Dict[str, Any]) -> Dict[str, 
                     (google_user['id'], google_user.get('name'), existing_user['id'])
                 )
                 conn.commit()
-                return existing_user
+                
+                # 업데이트된 사용자 정보 반환
+                cursor.execute("SELECT * FROM users WHERE id = %s", (existing_user['id'],))
+                user_data = cursor.fetchone()
+                
+                # 딕셔너리 형태로 변환
+                if isinstance(user_data, tuple):
+                    # 컬럼명 가져오기
+                    cursor.execute("DESCRIBE users")
+                    columns = [col[0] for col in cursor.fetchall()]
+                    user_data = dict(zip(columns, user_data))
+                
+                return user_data
             else:
                 # 새 사용자 생성
                 # 임시 비밀번호 생성 (Google OAuth 사용자는 비밀번호로 로그인하지 않음)
@@ -101,4 +113,13 @@ def create_or_update_user_from_google(google_user: Dict[str, Any]) -> Dict[str, 
                 
                 # 생성된 사용자 정보 반환
                 cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-                return cursor.fetchone()
+                user_data = cursor.fetchone()
+                
+                # 딕셔너리 형태로 변환
+                if isinstance(user_data, tuple):
+                    # 컬럼명 가져오기
+                    cursor.execute("DESCRIBE users")
+                    columns = [col[0] for col in cursor.fetchall()]
+                    user_data = dict(zip(columns, user_data))
+                
+                return user_data
