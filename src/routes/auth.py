@@ -13,10 +13,63 @@ from src.utils.auth import (
     create_user,
     verify_token,
     get_user_by_id,
+    create_refresh_token_for_user,
+    verify_and_rotate_refresh_token,
 )
 from src.utils.email import send_password_reset_email, send_email_verification_code
 
 router = APIRouter(prefix="/api", tags=["auth"])
+class RefreshResponse(BaseModel):
+    success: bool
+    access_token: str
+
+@router.post("/auth/refresh", response_model=RefreshResponse)
+def refresh_token(request: Request, response: Response):
+    """리프레시 쿠키로 액세스 토큰 재발급 (롤링 전략)."""
+    try:
+        raw = request.cookies.get("captcha_refresh")
+        if not raw:
+            raise HTTPException(status_code=401, detail="리프레시 토큰이 없습니다.")
+
+        result = verify_and_rotate_refresh_token(raw_token=raw, rotate=True)
+        if not result:
+            raise HTTPException(status_code=401, detail="리프레시 토큰이 유효하지 않습니다.")
+
+        user_id = result["user_id"]
+        # 새 액세스 토큰 발급
+        from datetime import timedelta
+        access = create_access_token({"sub": str(user_id)}, expires_delta=timedelta(minutes=30))
+
+        # 쿠키 갱신
+        response.set_cookie(
+            key="captcha_token",
+            value=access,
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=60 * 30
+        )
+
+        # 롤링된 새 리프레시가 있으면 교체
+        new_raw = result.get("new_refresh_raw")
+        if new_raw:
+            response.set_cookie(
+                key="captcha_refresh",
+                value=new_raw,
+                domain=".realcatcha.com",
+                httponly=True,
+                secure=True,
+                samesite="none",
+                max_age=60 * 60 * 24 * 14
+            )
+
+        return {"success": True, "access_token": access}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"refresh 실패: {e}")
+
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -233,6 +286,8 @@ def login(req: LoginRequest, response: Response):
             raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
 
         access_token = create_access_token({"sub": str(user["id"]), "email": user["email"]})
+        # Create refresh token
+        refresh_raw, _, refresh_exp = create_refresh_token_for_user(user_id=int(user["id"]))
         
         # 쿠키로 토큰 설정 (부모 도메인 .realcatcha.com)
         response.set_cookie(
@@ -243,6 +298,17 @@ def login(req: LoginRequest, response: Response):
             secure=True,    # HTTPS에서만 전송
             samesite="none", # CSRF 방지하면서 일반적인 사이트 간 이동 허용
             max_age=60 * 60 * 24 * 7  # 7일 (초 단위)
+        )
+
+        # Set refresh cookie (longer lived). Optional: Path lock to /api/auth/refresh
+        response.set_cookie(
+            key="captcha_refresh",
+            value=refresh_raw,
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=60 * 60 * 24 * 14
         )
         
         return {
@@ -415,6 +481,15 @@ def logout(response: Response):
             samesite="none",
             max_age=0  # 즉시 만료
         )
+        response.set_cookie(
+            key="captcha_refresh",
+            value="",
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=0
+        )
         return {"success": True, "message": "로그아웃되었습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"logout 실패: {e}")
@@ -455,13 +530,33 @@ def get_current_user_from_request(request: Request) -> Optional[Dict[str, Any]]:
 
 
 @router.get("/auth/me")
-def get_current_user(request: Request):
+def get_current_user(request: Request, response: Response):
     """현재 로그인된 사용자 정보 반환 (쿠키 또는 헤더 토큰 기반)"""
     try:
         user = get_current_user_from_request(request)
         if not user:
             raise HTTPException(status_code=401, detail="인증이 필요합니다.")
         
+        # 백필: refresh 쿠키가 없으면 1회 자동 발급
+        try:
+            has_refresh = bool(request.cookies.get("captcha_refresh"))
+            if not has_refresh:
+                # 최소 정보만 기록 (User-Agent 기반 디바이스 정보)
+                ua = request.headers.get("user-agent")
+                _raw, _, _exp = create_refresh_token_for_user(user_id=int(user["id"]), device_info=ua)
+                response.set_cookie(
+                    key="captcha_refresh",
+                    value=_raw,
+                    domain=".realcatcha.com",
+                    httponly=True,
+                    secure=True,
+                    samesite="none",
+                    max_age=60 * 60 * 24 * 14
+                )
+        except Exception:
+            # 백필 실패는 비치명적
+            pass
+
         return {
             "success": True,
             "user": user

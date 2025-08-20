@@ -1,6 +1,8 @@
 import os
 import jwt
 from datetime import datetime, timedelta
+import secrets
+import hashlib
 from passlib.context import CryptContext
 from typing import Optional, Dict, Any, Tuple
 from src.config.database import get_db_connection
@@ -12,6 +14,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "14"))
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """비밀번호 검증"""
@@ -39,6 +42,77 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except jwt.PyJWTError:
+        return None
+
+
+def _hash_refresh(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def create_refresh_token_for_user(user_id: int, device_info: Optional[str] = None) -> Tuple[str, str, datetime]:
+    """Create a refresh token for a user.
+    Returns (raw_token, token_hash, expires_at)
+    """
+    raw = secrets.token_urlsafe(64)
+    token_hash = _hash_refresh(raw)
+    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO refresh_tokens (user_id, token_hash, expires_at, device_info, last_used_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (user_id, token_hash, expires_at, device_info, datetime.utcnow()),
+                )
+        return raw, token_hash, expires_at
+    except Exception as e:
+        print(f"리프레시 토큰 생성 오류: {e}")
+        raise
+
+
+def verify_and_rotate_refresh_token(raw_token: str, rotate: bool = True, device_info: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Verify refresh token by hash. Optionally rotate (rolling refresh). Returns {user_id} on success."""
+    token_hash = _hash_refresh(raw_token)
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, user_id, expires_at, is_revoked FROM refresh_tokens
+                    WHERE token_hash=%s
+                    """,
+                    (token_hash,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+
+                # tuple/dict safe access
+                _id = row[0] if not isinstance(row, dict) else row["id"]
+                user_id = row[1] if not isinstance(row, dict) else row["user_id"]
+                expires_at = row[2] if not isinstance(row, dict) else row["expires_at"]
+                is_revoked = row[3] if not isinstance(row, dict) else row["is_revoked"]
+
+                if is_revoked:
+                    return None
+                if expires_at <= datetime.utcnow():
+                    return None
+
+                # update last_used_at
+                cursor.execute("UPDATE refresh_tokens SET last_used_at=%s WHERE id=%s", (datetime.utcnow(), _id))
+
+                if rotate:
+                    # revoke current and issue a new one
+                    cursor.execute("UPDATE refresh_tokens SET is_revoked=TRUE WHERE id=%s", (_id,))
+                    new_raw, new_hash, new_exp = create_refresh_token_for_user(user_id, device_info)
+                    return {"user_id": user_id, "new_refresh_raw": new_raw, "new_refresh_expires": new_exp}
+
+                return {"user_id": user_id}
+    except Exception as e:
+        print(f"리프레시 토큰 검증 오류: {e}")
         return None
 
 def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
