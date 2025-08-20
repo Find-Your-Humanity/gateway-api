@@ -69,8 +69,7 @@ def create_or_update_user_from_google(google_user: Dict[str, Any]) -> Dict[str, 
                     UPDATE users 
                     SET google_id = %s, oauth_provider = 'google', 
                         name = COALESCE(%s, name), 
-                        is_verified = TRUE,
-                        updated_at = CURRENT_TIMESTAMP
+                        is_verified = TRUE
                     WHERE id = %s
                     """,
                     (google_user['id'], google_user.get('name'), existing_user['id'])
