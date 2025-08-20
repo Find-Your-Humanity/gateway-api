@@ -13,6 +13,10 @@ from src.utils.auth import (
     create_user,
     verify_token,
     get_user_by_id,
+    create_refresh_token,
+    verify_refresh_token,
+    revoke_refresh_token,
+    revoke_all_user_refresh_tokens,
 )
 from src.utils.email import send_password_reset_email, send_email_verification_code
 
@@ -232,29 +236,97 @@ def login(req: LoginRequest, response: Response):
         if not user:
             raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
 
-        access_token = create_access_token({"sub": str(user["id"]), "email": user["email"]})
+        # Access Token 생성 (30분 유효기간)
+        access_token = create_access_token(
+            {"sub": str(user["id"]), "email": user["email"]}, 
+            expires_delta=timedelta(minutes=30)
+        )
         
-        # 쿠키로 토큰 설정 (부모 도메인 .realcatcha.com)
+        # Refresh Token 생성 (14일 유효기간)
+        device_info = request.headers.get("user-agent", "Unknown")
+        refresh_token = create_refresh_token(user["id"], device_info)
+        
+        if not refresh_token:
+            raise HTTPException(status_code=500, detail="Refresh Token 생성 실패")
+        
+        # Access Token을 쿠키로 설정 (30분)
         response.set_cookie(
             key="captcha_token",
             value=access_token,
-            domain=".realcatcha.com",  # 모든 서브도메인에서 접근 가능
-            httponly=True,  # XSS 방지
-            secure=True,    # HTTPS에서만 전송
-            samesite="none", # CSRF 방지하면서 일반적인 사이트 간 이동 허용
-            max_age=60 * 60 * 24 * 7  # 7일 (초 단위)
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=60 * 30  # 30분 (초 단위)
+        )
+        
+        # Refresh Token을 별도 쿠키로 설정 (14일)
+        response.set_cookie(
+            key="captcha_refresh_token",
+            value=refresh_token,
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=60 * 60 * 24 * 14  # 14일 (초 단위)
         )
         
         return {
             "success": True,
             "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
+            "expires_in": 30 * 60,  # 30분 (초 단위)
             "user": user,
         }
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"login 실패: {e}")
+
+
+@router.post("/auth/refresh")
+def refresh_access_token(request: Request, response: Response):
+    """Refresh Token을 사용하여 새로운 Access Token 발급"""
+    try:
+        # 쿠키에서 Refresh Token 추출
+        refresh_token = request.cookies.get("captcha_refresh_token")
+        if not refresh_token:
+            raise HTTPException(status_code=401, detail="Refresh Token이 없습니다.")
+        
+        # Refresh Token 검증 및 사용자 정보 조회
+        user = verify_refresh_token(refresh_token)
+        if not user:
+            raise HTTPException(status_code=401, detail="유효하지 않거나 만료된 Refresh Token입니다.")
+        
+        # 새로운 Access Token 생성 (30분)
+        new_access_token = create_access_token(
+            {"sub": str(user["id"]), "email": user["email"]}, 
+            expires_delta=timedelta(minutes=30)
+        )
+        
+        # 새 Access Token을 쿠키로 설정
+        response.set_cookie(
+            key="captcha_token",
+            value=new_access_token,
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=60 * 30  # 30분
+        )
+        
+        return {
+            "success": True,
+            "access_token": new_access_token,
+            "token_type": "bearer",
+            "expires_in": 30 * 60,  # 30분 (초 단위)
+            "user": user,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"토큰 갱신 실패: {e}")
 
 
 class SignupRequest(BaseModel):
@@ -402,12 +474,28 @@ def request_email_verification(req: RequestEmailVerification):
 
 
 @router.post("/auth/logout")
-def logout(response: Response):
-    """로그아웃 - 쿠키 제거"""
+def logout(request: Request, response: Response):
+    """로그아웃 - 쿠키 제거 및 Refresh Token 무효화"""
     try:
-        # 쿠키 제거 (같은 도메인/경로로 빈 값과 과거 만료일 설정)
+        # Refresh Token 무효화
+        refresh_token = request.cookies.get("captcha_refresh_token")
+        if refresh_token:
+            revoke_refresh_token(refresh_token)
+        
+        # Access Token 쿠키 제거
         response.set_cookie(
             key="captcha_token",
+            value="",
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=0  # 즉시 만료
+        )
+        
+        # Refresh Token 쿠키 제거
+        response.set_cookie(
+            key="captcha_refresh_token",
             value="",
             domain=".realcatcha.com",
             httponly=True,
