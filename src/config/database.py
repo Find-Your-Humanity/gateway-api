@@ -88,6 +88,40 @@ def init_database():
                 except Exception as e:
                     print(f"스키마 보정(is_verified 추가) 실패: {e}")
 
+            # 스키마 보정: Google OAuth 관련 컬럼 추가
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) NULL")
+            except Exception:
+                try:
+                    cursor.execute("SHOW COLUMNS FROM users LIKE 'google_id'")
+                    col = cursor.fetchone()
+                    if not col:
+                        cursor.execute("ALTER TABLE users ADD COLUMN google_id VARCHAR(255) NULL")
+                except Exception as e:
+                    print(f"스키마 보정(google_id 추가) 실패: {e}")
+
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_provider ENUM('local', 'google') DEFAULT 'local'")
+            except Exception:
+                try:
+                    cursor.execute("SHOW COLUMNS FROM users LIKE 'oauth_provider'")
+                    col = cursor.fetchone()
+                    if not col:
+                        cursor.execute("ALTER TABLE users ADD COLUMN oauth_provider ENUM('local', 'google') DEFAULT 'local'")
+                except Exception as e:
+                    print(f"스키마 보정(oauth_provider 추가) 실패: {e}")
+
+            # Google ID 인덱스 추가
+            try:
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_google_id ON users(google_id)")
+            except Exception:
+                try:
+                    cursor.execute("SHOW INDEX FROM users WHERE Key_name = 'idx_google_id'")
+                    if not cursor.fetchone():
+                        cursor.execute("CREATE INDEX idx_google_id ON users(google_id)")
+                except Exception as e:
+                    print(f"Google ID 인덱스 생성 실패: {e}")
+
             # 사용자 세션 테이블 생성
             cursor.execute(
                 """

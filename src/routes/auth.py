@@ -17,6 +17,8 @@ from src.utils.auth import (
     verify_and_rotate_refresh_token,
 )
 from src.utils.email import send_password_reset_email, send_email_verification_code
+from src.config.oauth import get_google_auth_url
+from src.utils.google_oauth import exchange_code_for_token, get_google_user_info, create_or_update_user_from_google
 
 router = APIRouter(prefix="/api", tags=["auth"])
 class RefreshResponse(BaseModel):
@@ -565,3 +567,94 @@ def get_current_user(request: Request, response: Response):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"사용자 정보 조회 실패: {e}")
+
+
+# ==================== Google OAuth 라우트 ====================
+
+@router.get("/auth/google")
+def google_login():
+    """Google OAuth 로그인 URL 생성"""
+    try:
+        auth_url = get_google_auth_url()
+        return {"auth_url": auth_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Google OAuth URL 생성 실패: {e}")
+
+
+@router.get("/auth/google/callback")
+async def google_callback(code: str, response: Response):
+    """Google OAuth 콜백 처리"""
+    try:
+        if not code:
+            raise HTTPException(status_code=400, detail="인증 코드가 없습니다.")
+        
+        # 1. 인증 코드를 액세스 토큰으로 교환
+        token_data = await exchange_code_for_token(code)
+        if not token_data:
+            raise HTTPException(status_code=400, detail="토큰 교환에 실패했습니다.")
+        
+        access_token = token_data.get('access_token')
+        if not access_token:
+            raise HTTPException(status_code=400, detail="액세스 토큰을 받지 못했습니다.")
+        
+        # 2. 액세스 토큰으로 사용자 정보 가져오기
+        google_user = await get_google_user_info(access_token)
+        if not google_user:
+            raise HTTPException(status_code=400, detail="사용자 정보를 가져오지 못했습니다.")
+        
+        # 3. 사용자 정보로 로컬 사용자 생성/업데이트
+        user = create_or_update_user_from_google(google_user)
+        if not user:
+            raise HTTPException(status_code=500, detail="사용자 생성/업데이트에 실패했습니다.")
+        
+        # 4. JWT 토큰 생성
+        from datetime import timedelta
+        access_token_jwt = create_access_token(
+            {"sub": str(user["id"])}, 
+            expires_delta=timedelta(minutes=30)
+        )
+        
+        # 5. 리프레시 토큰 생성
+        refresh_raw, _, _ = create_refresh_token_for_user(
+            user_id=user["id"], 
+            device_info="Google OAuth"
+        )
+        
+        # 6. 쿠키 설정
+        response.set_cookie(
+            key="captcha_token",
+            value=access_token_jwt,
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=60 * 30  # 30분
+        )
+        
+        response.set_cookie(
+            key="captcha_refresh",
+            value=refresh_raw,
+            domain=".realcatcha.com",
+            httponly=True,
+            secure=True,
+            samesite="none",
+            max_age=60 * 60 * 24 * 14  # 14일
+        )
+        
+        # 7. 프론트엔드로 리디렉트
+        return {
+            "success": True,
+            "message": "Google 로그인이 완료되었습니다.",
+            "user": {
+                "id": user["id"],
+                "email": user["email"],
+                "username": user["username"],
+                "name": user.get("name"),
+                "is_admin": user["is_admin"]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Google OAuth 처리 실패: {e}")
