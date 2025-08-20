@@ -824,12 +824,21 @@ def submit_contact_request(
     request: Request,
     subject: str = Form(...),
     contact: str = Form(...),
-    email: str = Form(...),
+    email: str = Form(...),  # 폼에서 받지만 무시하고 쿠키에서 사용자 이메일 사용
     message: str = Form(...),
     file: Optional[UploadFile] = File(None)
 ):
-    """고객 문의 제출"""
+    """고객 문의 제출 (로그인 사용자만)"""
     try:
+        # 로그인 체크
+        user = get_current_user_from_request(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="로그인이 필요합니다")
+        
+        # 쿠키에서 사용자 정보 강제 사용 (폼의 email 무시)
+        user_email = user["email"]
+        user_id = user["id"]
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 # 테이블이 존재하는지 확인하고 없으면 생성
@@ -837,13 +846,14 @@ def submit_contact_request(
                 table_exists = cursor.fetchone()
                 
                 if not table_exists:
-                    # 테이블 생성
+                    # 테이블 생성 (user_id 컬럼 추가)
                     create_table_query = """
                         CREATE TABLE contact_requests (
                             id INT AUTO_INCREMENT PRIMARY KEY,
                             subject VARCHAR(255) NOT NULL,
                             contact VARCHAR(100) NOT NULL,
                             email VARCHAR(255) NOT NULL,
+                            user_id INT NULL,
                             message TEXT NOT NULL,
                             attachment_filename VARCHAR(255) NULL,
                             attachment_data LONGBLOB NULL,
@@ -855,11 +865,22 @@ def submit_contact_request(
                             resolved_at TIMESTAMP NULL,
                             INDEX idx_status (status),
                             INDEX idx_created_at (created_at),
-                            INDEX idx_email (email)
+                            INDEX idx_email (email),
+                            INDEX idx_user_id (user_id),
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                     """
                     cursor.execute(create_table_query)
                     conn.commit()
+                else:
+                    # 기존 테이블에 user_id 컬럼이 있는지 확인
+                    cursor.execute("SHOW COLUMNS FROM contact_requests LIKE 'user_id'")
+                    user_id_exists = cursor.fetchone()
+                    
+                    if not user_id_exists:
+                        # user_id 컬럼 추가
+                        cursor.execute("ALTER TABLE contact_requests ADD COLUMN user_id INT NULL, ADD INDEX idx_user_id(user_id)")
+                        conn.commit()
                 
                 # 첨부파일 처리
                 attachment_filename = None
@@ -869,15 +890,15 @@ def submit_contact_request(
                     attachment_filename = file.filename
                     attachment_data = file.file.read()
                 
-                # 문의 저장
+                # 문의 저장 (user_id 포함)
                 query = """
                     INSERT INTO contact_requests 
-                    (subject, contact, email, message, attachment_filename, attachment_data, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'unread')
+                    (subject, contact, email, user_id, message, attachment_filename, attachment_data, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'unread')
                 """
                 
                 cursor.execute(query, (
-                    subject, contact, email, message, 
+                    subject, contact, user_email, user_id, message, 
                     attachment_filename, attachment_data
                 ))
                 
@@ -889,7 +910,7 @@ def submit_contact_request(
                     "success": True, 
                     "message": "문의가 성공적으로 접수되었습니다.",
                     "contact_id": contact_id,
-                    "status_check_url": f"https://realcatcha.com/contact-status?email={email}&id={contact_id}"
+                    "status_check_url": f"https://realcatcha.com/contact-status?email={user_email}&id={contact_id}"
                 }
                 
     except Exception as e:
