@@ -3,7 +3,7 @@ import logging
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from src.config.database import get_db_connection
-from src.utils.auth import get_current_user_from_request
+from src.routes.auth import get_current_user_from_request
 
 logger = logging.getLogger(__name__)
 
