@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from src.routes.auth import router as auth_router
 from src.routes.dashboard import router as dashboard_router
 from src.routes.admin import router as admin_router
+from src.middleware.request_logging import RequestLoggingMiddleware
 import asyncio
 from src.config.database import (
     init_database,
@@ -23,7 +24,7 @@ app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 
-# CORS 설정 추가
+# 미들웨어 등록 (순서 중요: CORS -> 로깅)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -36,6 +37,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# 요청 로깅 미들웨어 추가
+app.add_middleware(RequestLoggingMiddleware)
 
 # 422 검증 오류를 사용자 친화적으로 반환하는 전역 핸들러
 def _translate_validation_error(err: dict) -> dict:

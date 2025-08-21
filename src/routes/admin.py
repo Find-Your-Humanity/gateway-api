@@ -98,6 +98,40 @@ class PlanUpdate(BaseModel):
     is_popular: Optional[bool] = None
     sort_order: Optional[int] = None
 
+# 요청 상태 조회 관련 모델들
+class RequestLogResponse(BaseModel):
+    id: int
+    user_id: Optional[int] = None
+    api_key: Optional[str] = None
+    path: str
+    method: str
+    status_code: int
+    response_time: int
+    user_agent: Optional[str] = None
+    request_time: str
+    # 추가 정보
+    user_email: Optional[str] = None
+    user_username: Optional[str] = None
+
+class RequestStatsResponse(BaseModel):
+    total_requests: int
+    success_count: int
+    failure_count: int
+    avg_response_time: float
+    unique_users: int
+    unique_api_keys: int
+
+class ErrorStatsResponse(BaseModel):
+    status_code: int
+    count: int
+    percentage: float
+
+class EndpointUsageResponse(BaseModel):
+    endpoint: str
+    requests: int
+    avg_response_time: float
+    percentage: float
+
 class SubscriptionResponse(BaseModel):
     id: int
     user_id: int
@@ -1420,3 +1454,277 @@ async def get_my_contact_requests(request: Request):
         logger.error(f"Error fetching user contact requests: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"문의사항 조회 실패: {str(e)}")
+
+# ===== 요청 상태 관리 API =====
+
+@router.get("/admin/request-stats")
+def get_request_statistics(
+    request: Request,
+    days: int = Query(7, description="조회할 일수", ge=1, le=90)
+):
+    """요청 통계 조회"""
+    try:
+        # 관리자 권한 확인
+        current_user = get_current_user_from_request(request)
+        if not current_user or not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 전체 통계
+                stats_query = f"""
+                    SELECT 
+                        COUNT(*) as total_requests,
+                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as success_count,
+                        SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failure_count,
+                        AVG(response_time) as avg_response_time,
+                        COUNT(DISTINCT user_id) as unique_users,
+                        COUNT(DISTINCT api_key) as unique_api_keys
+                    FROM request_logs
+                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                """
+                cursor.execute(stats_query)
+                stats = cursor.fetchone()
+                
+                if not stats:
+                    return {
+                        "total_requests": 0,
+                        "success_count": 0,
+                        "failure_count": 0,
+                        "avg_response_time": 0,
+                        "unique_users": 0,
+                        "unique_api_keys": 0
+                    }
+                
+                return {
+                    "total_requests": stats["total_requests"] or 0,
+                    "success_count": stats["success_count"] or 0,
+                    "failure_count": stats["failure_count"] or 0,
+                    "avg_response_time": round(float(stats["avg_response_time"] or 0), 2),
+                    "unique_users": stats["unique_users"] or 0,
+                    "unique_api_keys": stats["unique_api_keys"] or 0
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching request statistics: {e}")
+        raise HTTPException(status_code=500, detail=f"요청 통계 조회 실패: {str(e)}")
+
+@router.get("/admin/request-logs")
+def get_request_logs(
+    request: Request,
+    page: int = Query(1, description="페이지 번호", ge=1),
+    limit: int = Query(50, description="페이지당 항목 수", ge=1, le=200),
+    user_id: Optional[int] = Query(None, description="사용자 ID 필터"),
+    status_code: Optional[int] = Query(None, description="상태 코드 필터"),
+    path: Optional[str] = Query(None, description="경로 필터"),
+    days: int = Query(7, description="조회할 일수", ge=1, le=90)
+):
+    """요청 로그 조회"""
+    try:
+        # 관리자 권한 확인
+        current_user = get_current_user_from_request(request)
+        if not current_user or not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # WHERE 조건 구성
+                where_conditions = [f"request_time >= NOW() - INTERVAL {days} DAY"]
+                params = []
+                
+                if user_id is not None:
+                    where_conditions.append("user_id = %s")
+                    params.append(user_id)
+                
+                if status_code is not None:
+                    where_conditions.append("status_code = %s")
+                    params.append(status_code)
+                
+                if path:
+                    where_conditions.append("path LIKE %s")
+                    params.append(f"%{path}%")
+                
+                where_clause = " AND ".join(where_conditions)
+                
+                # 전체 개수 조회
+                count_query = f"SELECT COUNT(*) as total FROM request_logs WHERE {where_clause}"
+                cursor.execute(count_query, params)
+                total_count = cursor.fetchone()["total"]
+                
+                # 페이지네이션 계산
+                offset = (page - 1) * limit
+                
+                # 로그 데이터 조회
+                logs_query = f"""
+                    SELECT 
+                        rl.id,
+                        rl.user_id,
+                        rl.api_key,
+                        rl.path,
+                        rl.method,
+                        rl.status_code,
+                        rl.response_time,
+                        rl.user_agent,
+                        rl.request_time,
+                        u.email as user_email,
+                        u.username as user_username
+                    FROM request_logs rl
+                    LEFT JOIN users u ON rl.user_id = u.id
+                    WHERE {where_clause}
+                    ORDER BY rl.request_time DESC
+                    LIMIT %s OFFSET %s
+                """
+                
+                cursor.execute(logs_query, params + [limit, offset])
+                logs = cursor.fetchall()
+                
+                # 결과 변환
+                log_list = []
+                for log in logs:
+                    log_list.append({
+                        "id": log["id"],
+                        "user_id": log["user_id"],
+                        "api_key": log["api_key"],
+                        "path": log["path"],
+                        "method": log["method"],
+                        "status_code": log["status_code"],
+                        "response_time": log["response_time"],
+                        "user_agent": log["user_agent"],
+                        "request_time": str(log["request_time"]),
+                        "user_email": log["user_email"],
+                        "user_username": log["user_username"]
+                    })
+                
+                return {
+                    "logs": log_list,
+                    "pagination": {
+                        "page": page,
+                        "limit": limit,
+                        "total": total_count,
+                        "pages": (total_count + limit - 1) // limit
+                    }
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching request logs: {e}")
+        raise HTTPException(status_code=500, detail=f"요청 로그 조회 실패: {str(e)}")
+
+@router.get("/admin/error-stats")
+def get_error_statistics(
+    request: Request,
+    days: int = Query(7, description="조회할 일수", ge=1, le=90)
+):
+    """오류 통계 조회"""
+    try:
+        # 관리자 권한 확인
+        current_user = get_current_user_from_request(request)
+        if not current_user or not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 전체 요청 수 조회
+                total_query = f"""
+                    SELECT COUNT(*) as total
+                    FROM request_logs
+                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                """
+                cursor.execute(total_query)
+                total_requests = cursor.fetchone()["total"]
+                
+                if total_requests == 0:
+                    return {"error_stats": []}
+                
+                # 오류별 통계 조회
+                error_query = f"""
+                    SELECT 
+                        status_code,
+                        COUNT(*) as count
+                    FROM request_logs
+                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                        AND status_code >= 400
+                    GROUP BY status_code
+                    ORDER BY count DESC
+                """
+                cursor.execute(error_query)
+                errors = cursor.fetchall()
+                
+                error_stats = []
+                for error in errors:
+                    percentage = round((error["count"] / total_requests) * 100, 2)
+                    error_stats.append({
+                        "status_code": error["status_code"],
+                        "count": error["count"],
+                        "percentage": percentage
+                    })
+                
+                return {"error_stats": error_stats}
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching error statistics: {e}")
+        raise HTTPException(status_code=500, detail=f"오류 통계 조회 실패: {str(e)}")
+
+@router.get("/admin/endpoint-usage")
+def get_endpoint_usage(
+    request: Request,
+    days: int = Query(7, description="조회할 일수", ge=1, le=90)
+):
+    """엔드포인트별 사용량 조회"""
+    try:
+        # 관리자 권한 확인
+        current_user = get_current_user_from_request(request)
+        if not current_user or not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 전체 요청 수 조회
+                total_query = f"""
+                    SELECT COUNT(*) as total
+                    FROM request_logs
+                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                """
+                cursor.execute(total_query)
+                total_requests = cursor.fetchone()["total"]
+                
+                if total_requests == 0:
+                    return {"endpoint_usage": []}
+                
+                # 엔드포인트별 사용량 조회
+                usage_query = f"""
+                    SELECT 
+                        path as endpoint,
+                        COUNT(*) as requests,
+                        AVG(response_time) as avg_response_time
+                    FROM request_logs
+                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                    GROUP BY path
+                    ORDER BY requests DESC
+                    LIMIT 20
+                """
+                cursor.execute(usage_query)
+                endpoints = cursor.fetchall()
+                
+                endpoint_usage = []
+                for endpoint in endpoints:
+                    percentage = round((endpoint["requests"] / total_requests) * 100, 2)
+                    endpoint_usage.append({
+                        "endpoint": endpoint["endpoint"],
+                        "requests": endpoint["requests"],
+                        "avg_response_time": round(float(endpoint["avg_response_time"] or 0), 2),
+                        "percentage": percentage
+                    })
+                
+                return {"endpoint_usage": endpoint_usage}
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching endpoint usage: {e}")
+        raise HTTPException(status_code=500, detail=f"엔드포인트 사용량 조회 실패: {str(e)}")
