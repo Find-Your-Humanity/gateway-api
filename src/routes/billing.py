@@ -398,11 +398,11 @@ async def get_usage_stats(user=Depends(get_current_user_from_request)):
         current_usage = cursor.fetchone()
         
         # 지난달 사용량
-        from datetime import date
         if current_month.month == 1:
             last_month = date(current_month.year - 1, 12, 1)
         else:
             last_month = date(current_month.year, current_month.month - 1, 1)
+        
         cursor.execute("""
             SELECT COALESCE(SUM(tokens_used), 0) as total_tokens,
                    COALESCE(SUM(api_calls), 0) as total_calls,
