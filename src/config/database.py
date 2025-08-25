@@ -226,14 +226,7 @@ def init_database():
             )
 
 def create_tables():
-    # users 테이블에 plan_id 컬럼 추가
-    cursor.execute("""
-        ALTER TABLE users 
-        ADD COLUMN IF NOT EXISTS plan_id INT DEFAULT 1,
-        ADD FOREIGN KEY IF NOT EXISTS (plan_id) REFERENCES plans(id)
-    """)
-    
-    # plans 테이블 확장 (사진의 기능들을 위해)
+    # plans 테이블을 먼저 생성 (사진의 기능들을 위해)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS plans (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -250,6 +243,22 @@ def create_tables():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """)
+    
+    # users 테이블에 plan_id 컬럼 추가 (plans 테이블 생성 후)
+    cursor.execute("""
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS plan_id INT DEFAULT 1
+    """)
+    
+    # 외래키 제약 조건 추가 (별도로 처리)
+    try:
+        cursor.execute("""
+            ALTER TABLE users 
+            ADD CONSTRAINT fk_users_plan_id 
+            FOREIGN KEY (plan_id) REFERENCES plans(id)
+        """)
+    except Exception as e:
+        print(f"외래키 제약 조건 추가 실패 (이미 존재할 수 있음): {e}")
     
     # user_subscriptions 테이블 확장
     cursor.execute("""
