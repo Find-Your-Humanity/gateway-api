@@ -69,13 +69,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         
         return response
     
-    async def _log_request_async(self, **kwargs):
+    async def _log_request_async(self, user_id, api_key, path, method, status_code, response_time, user_agent):
         """비동기로 요청 로그를 데이터베이스에 저장"""
         import asyncio
         
         # 별도 스레드에서 동기 DB 작업 실행
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._log_request_sync, **kwargs)
+        await loop.run_in_executor(None, self._log_request_sync, user_id, api_key, path, method, status_code, response_time, user_agent)
     
     def _log_request_sync(self, user_id, api_key, path, method, status_code, response_time, user_agent):
         """동기적으로 요청 로그를 데이터베이스에 저장"""
