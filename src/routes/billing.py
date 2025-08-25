@@ -64,13 +64,24 @@ async def get_available_plans():
         
         plans = []
         for row in cursor.fetchall():
+            # features 컬럼은 JSON 또는 빈 문자열/NULL일 수 있으므로 안전하게 파싱
+            raw_features = row[5]
+            features_dict = {}
+            if raw_features is not None:
+                try:
+                    text_features = raw_features.decode("utf-8") if isinstance(raw_features, (bytes, bytearray, memoryview)) else str(raw_features)
+                    text_features = text_features.strip()
+                    if text_features:
+                        features_dict = json.loads(text_features)
+                except Exception:
+                    features_dict = {}
             plan = {
                 "id": row[0],
                 "name": row[1],
                 "price": float(row[2]),
                 "request_limit": row[3],
                 "description": row[4],
-                "features": json.loads(row[5]) if row[5] else {},
+                "features": features_dict,
                 "rate_limit_per_minute": row[6],
                 "is_popular": bool(row[7]),
                 "sort_order": row[8]
@@ -116,13 +127,25 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                     detail="기본 요금제를 찾을 수 없습니다."
                 )
         
+        # features 컬럼 안전 파싱
+        raw_features = user_plan[5]
+        features_dict = {}
+        if raw_features is not None:
+            try:
+                text_features = raw_features.decode("utf-8") if isinstance(raw_features, (bytes, bytearray, memoryview)) else str(raw_features)
+                text_features = text_features.strip()
+                if text_features:
+                    features_dict = json.loads(text_features)
+            except Exception:
+                features_dict = {}
+
         plan = {
             "id": user_plan[0],
             "name": user_plan[1],
             "price": float(user_plan[2]),
             "request_limit": user_plan[3],
             "description": user_plan[4],
-            "features": json.loads(user_plan[5]) if user_plan[5] else {},
+            "features": features_dict,
             "rate_limit_per_minute": user_plan[6],
             "is_popular": bool(user_plan[7]),
             "sort_order": user_plan[8]
