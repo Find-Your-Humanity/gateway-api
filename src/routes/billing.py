@@ -108,6 +108,13 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                 FROM plans WHERE name = 'Demo'
             """)
             user_plan = cursor.fetchone()
+            
+            # Demo 플랜도 없으면 기본값 생성
+            if not user_plan:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="기본 요금제를 찾을 수 없습니다."
+                )
         
         plan = {
             "id": user_plan[0],
@@ -391,7 +398,11 @@ async def get_usage_stats(user=Depends(get_current_user_from_request)):
         current_usage = cursor.fetchone()
         
         # 지난달 사용량
-        last_month = (current_month.replace(day=1) - timedelta(days=1)).replace(day=1)
+        from datetime import date
+        if current_month.month == 1:
+            last_month = date(current_month.year - 1, 12, 1)
+        else:
+            last_month = date(current_month.year, current_month.month - 1, 1)
         cursor.execute("""
             SELECT COALESCE(SUM(tokens_used), 0) as total_tokens,
                    COALESCE(SUM(api_calls), 0) as total_calls,
