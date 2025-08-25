@@ -225,6 +225,29 @@ def init_database():
                 """
             )
 
+            # ---- 요청 로그 테이블: request_logs ----
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS request_logs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NULL,
+                    api_key VARCHAR(255) NULL,
+                    path VARCHAR(500) NOT NULL,
+                    method VARCHAR(10) NOT NULL,
+                    status_code INT NOT NULL,
+                    response_time INT NOT NULL,
+                    user_agent TEXT NULL,
+                    request_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_user_id (user_id),
+                    INDEX idx_api_key (api_key),
+                    INDEX idx_request_time (request_time),
+                    INDEX idx_status_code (status_code),
+                    INDEX idx_path (path),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+
 def create_tables():
     # plans 테이블을 먼저 생성 (사진의 기능들을 위해)
     cursor.execute("""

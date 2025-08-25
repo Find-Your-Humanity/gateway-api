@@ -82,34 +82,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         try:
             with get_db_connection() as conn:
                 with conn.cursor() as cursor:
-                    # request_logs 테이블이 존재하는지 확인
-                    cursor.execute("SHOW TABLES LIKE 'request_logs'")
-                    table_exists = cursor.fetchone()
-                    
-                    if not table_exists:
-                        # 테이블이 없으면 생성
-                        create_table_query = """
-                            CREATE TABLE request_logs (
-                                id INT AUTO_INCREMENT PRIMARY KEY,
-                                user_id INT NULL,
-                                api_key VARCHAR(255) NULL,
-                                path VARCHAR(500) NOT NULL,
-                                method VARCHAR(10) NOT NULL,
-                                status_code INT NOT NULL,
-                                response_time INT NOT NULL,
-                                user_agent TEXT NULL,
-                                request_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                INDEX idx_user_id (user_id),
-                                INDEX idx_api_key (api_key),
-                                INDEX idx_request_time (request_time),
-                                INDEX idx_status_code (status_code),
-                                INDEX idx_path (path),
-                                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                        """
-                        cursor.execute(create_table_query)
-                        conn.commit()
-                    
                     # 로그 데이터 삽입
                     insert_query = """
                         INSERT INTO request_logs 
