@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
 
-router = APIRouter(prefix="/api", tags=["billing"])
+router = APIRouter(tags=["billing"])
 
 # Pydantic 모델들
 class PlanResponse(BaseModel):
@@ -47,7 +47,7 @@ class PaymentResponse(BaseModel):
     message: str
     redirect_url: Optional[str] = None
 
-@router.get("/billing/plans", response_model=List[PlanResponse])
+@router.get("/api/billing/plans", response_model=List[PlanResponse])
 async def get_available_plans():
     """사용 가능한 요금제 목록 조회"""
     conn = get_db_connection()
@@ -82,7 +82,7 @@ async def get_available_plans():
         cursor.close()
         conn.close()
 
-@router.get("/billing/current-plan", response_model=CurrentPlanResponse)
+@router.get("/api/billing/current-plan", response_model=CurrentPlanResponse)
 async def get_current_plan(user=Depends(get_current_user_from_request)):
     """현재 사용자의 요금제 정보 조회"""
     conn = get_db_connection()
@@ -200,7 +200,7 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
         cursor.close()
         conn.close()
 
-@router.get("/billing/usage", response_model=List[UsageResponse])
+@router.get("/api/billing/usage", response_model=List[UsageResponse])
 async def get_usage_history(
     user=Depends(get_current_user_from_request),
     start_date: Optional[str] = None,
@@ -244,7 +244,7 @@ async def get_usage_history(
         cursor.close()
         conn.close()
 
-@router.post("/billing/change-plan")
+@router.post("/api/billing/change-plan")
 async def change_plan(
     request: PlanChangeRequest,
     user=Depends(get_current_user_from_request)
@@ -314,7 +314,7 @@ async def change_plan(
         cursor.close()
         conn.close()
 
-@router.post("/billing/purchase-plan", response_model=PaymentResponse)
+@router.post("/api/billing/purchase-plan", response_model=PaymentResponse)
 async def purchase_plan(
     request: PaymentRequest,
     user=Depends(get_current_user_from_request)
@@ -378,7 +378,7 @@ async def purchase_plan(
         cursor.close()
         conn.close()
 
-@router.get("/billing/usage-stats")
+@router.get("/api/billing/usage-stats")
 async def get_usage_stats(user=Depends(get_current_user_from_request)):
     """사용량 통계 조회 (실시간 + 지난달)"""
     conn = get_db_connection()

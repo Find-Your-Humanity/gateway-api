@@ -34,11 +34,14 @@ app.add_middleware(
         "https://realcatcha.com",
         "https://www.realcatcha.com",
         "https://test.realcatcha.com",
-        "https://dashboard.realcatcha.com"
+        "https://dashboard.realcatcha.com",
+        "http://localhost:3000",
+        "http://localhost:3001"
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # 미들웨어 추가 (순서 중요: CORS -> 로깅 -> 사용량 추적)
