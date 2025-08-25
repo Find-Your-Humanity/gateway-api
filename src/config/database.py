@@ -225,6 +225,92 @@ def init_database():
                 """
             )
 
+def create_tables():
+    # users 테이블에 plan_id 컬럼 추가
+    cursor.execute("""
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS plan_id INT DEFAULT 1,
+        ADD FOREIGN KEY IF NOT EXISTS (plan_id) REFERENCES plans(id)
+    """)
+    
+    # plans 테이블 확장 (사진의 기능들을 위해)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS plans (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            request_limit INT NOT NULL DEFAULT 1000,
+            description TEXT,
+            features JSON,
+            rate_limit_per_minute INT DEFAULT 30,
+            is_active BOOLEAN DEFAULT TRUE,
+            is_popular BOOLEAN DEFAULT FALSE,
+            sort_order INT DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+    
+    # user_subscriptions 테이블 확장
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_subscriptions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            plan_id INT NOT NULL,
+            start_date DATE NOT NULL,
+            end_date DATE,
+            status ENUM('active', 'cancelled', 'expired') DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (plan_id) REFERENCES plans(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+    
+    # 사용량 추적을 위한 테이블
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage_tracking (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            plan_id INT NOT NULL,
+            date DATE NOT NULL,
+            tokens_used INT DEFAULT 0,
+            api_calls INT DEFAULT 0,
+            overage_tokens INT DEFAULT 0,
+            overage_cost DECIMAL(10,2) DEFAULT 0.00,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (plan_id) REFERENCES plans(id),
+            UNIQUE KEY unique_user_date (user_id, date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+    
+    # 결제 로그 테이블
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS payment_logs (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            plan_id INT NOT NULL,
+            amount DECIMAL(10,2) NOT NULL,
+            payment_method VARCHAR(50) NOT NULL,
+            payment_id VARCHAR(100) UNIQUE,
+            status ENUM('pending', 'completed', 'failed', 'cancelled') DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (plan_id) REFERENCES plans(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """)
+    
+    # 기본 플랜 데이터 삽입 (이미 존재하지 않는 경우)
+    cursor.execute("""
+        INSERT IGNORE INTO plans (id, name, price, request_limit, description, features, rate_limit_per_minute, is_active, is_popular, sort_order) VALUES
+        (1, 'Demo', 0.00, 100, '데모 플랜', '{"analytics": "basic", "api_access": true, "ads": true}', 10, TRUE, FALSE, 0),
+        (2, 'Free', 0.00, 1000, '무료 플랜', '{"analytics": "basic", "api_access": true, "ads": true}', 30, TRUE, FALSE, 1),
+        (3, 'Starter', 29900.00, 50000, '스타터 플랜', '{"analytics": "standard", "api_access": true, "ads": false, "email_support": true}', 100, TRUE, TRUE, 2),
+        (4, 'Pro', 79900.00, 200000, '프로 플랜', '{"analytics": "advanced", "api_access": true, "ads": false, "email_support": true, "custom_ui": true, "advanced_reports": true}', 500, TRUE, FALSE, 3)
+    """)
+
 def cleanup_password_reset_tokens() -> int:
     """만료되었거나 사용 완료 후 일정 기간 지난 토큰 정리. 삭제된 행 수 반환"""
     with get_db_connection() as conn:

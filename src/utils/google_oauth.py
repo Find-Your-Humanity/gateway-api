@@ -96,8 +96,8 @@ def create_or_update_user_from_google(google_user: Dict[str, Any]) -> Dict[str, 
                 
                 cursor.execute(
                     """
-                    INSERT INTO users (email, username, password_hash, name, google_id, oauth_provider, is_verified)
-                    VALUES (%s, %s, %s, %s, %s, 'google', TRUE)
+                    INSERT INTO users (email, username, password_hash, name, google_id, oauth_provider, is_verified, plan_id)
+                    VALUES (%s, %s, %s, %s, %s, 'google', TRUE, 1)
                     """,
                     (
                         google_user['email'],

@@ -238,19 +238,20 @@ def get_users(
                 total = result['total_count'] if isinstance(result, dict) else result[0]
                 print(f"총 사용자 수: {total}")
                 
-                # 페이지네이션된 데이터 조회 (구독 정보 포함)
+                # 페이지네이션된 데이터 조회 (현재 플랜 정보 포함)
                 offset = (page - 1) * limit
                 data_query = f"""
                     SELECT 
                         u.id, u.email, u.username, u.name, u.contact, 
                         u.is_active, u.is_admin, u.created_at,
                         p.name as current_plan,
-                        p.display_name as plan_display_name,
+                        p.name as plan_display_name,
                         us.status as subscription_status,
-                        us.end_date as subscription_expires
+                        us.end_date as subscription_expires,
+                        u.plan_id as user_plan_id
                     FROM users u
-                    LEFT JOIN user_subscriptions us ON u.id = us.user_id AND us.status = 'active'
-                    LEFT JOIN plans p ON us.plan_id = p.id
+                    LEFT JOIN plans p ON u.plan_id = p.id
+                    LEFT JOIN user_subscriptions us ON u.id = us.user_id AND us.status = 'active' AND us.start_date <= CURDATE()
                     {where_clause}
                     ORDER BY u.created_at DESC
                     LIMIT %s OFFSET %s
