@@ -47,6 +47,55 @@ class PaymentResponse(BaseModel):
     message: str
     redirect_url: Optional[str] = None
 
+@router.get("/test-db")
+async def test_database_connection():
+    """데이터베이스 연결 테스트"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. 기본 연결 테스트
+        cursor.execute("SELECT 1 as test")
+        result = cursor.fetchone()
+        print(f"✅ 기본 연결 테스트: {result}")
+        
+        # 2. plans 테이블 존재 확인
+        cursor.execute("SHOW TABLES LIKE 'plans'")
+        plans_table = cursor.fetchone()
+        print(f"✅ plans 테이블 존재: {plans_table is not None}")
+        
+        # 3. plans 테이블 구조 확인
+        if plans_table:
+            cursor.execute("DESCRIBE plans")
+            columns = cursor.fetchall()
+            print(f"✅ plans 테이블 컬럼: {len(columns)}개")
+            for col in columns:
+                print(f"  - {col['Field']}: {col['Type']}")
+        
+        # 4. plans 테이블 데이터 확인
+        cursor.execute("SELECT COUNT(*) as count FROM plans")
+        count_result = cursor.fetchone()
+        print(f"✅ plans 테이블 데이터: {count_result['count']}개")
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "message": "데이터베이스 연결 성공",
+            "plans_count": count_result['count'] if count_result else 0
+        }
+        
+    except Exception as e:
+        print(f"❌ 데이터베이스 테스트 오류: {e}")
+        import traceback
+        print(f"❌ 스택 트레이스: {traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "데이터베이스 연결 실패"
+        }
+
 @router.get("/plans", response_model=List[PlanResponse])
 async def get_available_plans():
     """사용 가능한 요금제 목록 조회"""
