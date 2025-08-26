@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
 
-router = APIRouter(tags=["billing"])
+router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 # Pydantic 모델들
 class PlanResponse(BaseModel):
@@ -47,7 +47,7 @@ class PaymentResponse(BaseModel):
     message: str
     redirect_url: Optional[str] = None
 
-@router.get("/api/billing/plans", response_model=List[PlanResponse])
+@router.get("/plans", response_model=List[PlanResponse])
 async def get_available_plans():
     """사용 가능한 요금제 목록 조회"""
     conn = get_db_connection()
@@ -93,7 +93,7 @@ async def get_available_plans():
         cursor.close()
         conn.close()
 
-@router.get("/api/billing/current-plan", response_model=CurrentPlanResponse)
+@router.get("/current-plan", response_model=CurrentPlanResponse)
 async def get_current_plan(user=Depends(get_current_user_from_request)):
     """현재 사용자의 요금제 정보 조회"""
     conn = get_db_connection()
@@ -155,8 +155,8 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
         cursor.execute("""
             SELECT start_date, end_date
             FROM user_subscriptions
-            WHERE user_id = %s AND status = 'active' AND start_date <= CURDATE()
-            ORDER BY created_at DESC
+            WHERE user_id = %s AND start_date <= CURDATE()
+            ORDER BY start_date DESC
             LIMIT 1
         """, (user["id"],))
         
@@ -227,7 +227,7 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
         cursor.close()
         conn.close()
 
-@router.get("/api/billing/usage", response_model=List[UsageResponse])
+@router.get("/usage", response_model=List[UsageResponse])
 async def get_usage_history(
     user=Depends(get_current_user_from_request),
     start_date: Optional[str] = None,
@@ -273,7 +273,7 @@ async def get_usage_history(
         cursor.close()
         conn.close()
 
-@router.post("/api/billing/change-plan")
+@router.post("/change-plan")
 async def change_plan(
     request: PlanChangeRequest,
     user=Depends(get_current_user_from_request)
@@ -303,7 +303,7 @@ async def change_plan(
         # 기존 활성 구독이 있으면 다음 달부터 종료
         cursor.execute("""
             SELECT id FROM user_subscriptions 
-            WHERE user_id = %s AND status = 'active'
+            WHERE user_id = %s AND end_date IS NULL
         """, (user["id"],))
         
         existing_subscription = cursor.fetchone()
@@ -316,8 +316,8 @@ async def change_plan(
         
         # 새 구독 생성 (다음 달 1일부터 시작)
         cursor.execute("""
-            INSERT INTO user_subscriptions (user_id, plan_id, start_date, status)
-            VALUES (%s, %s, %s, 'active')
+            INSERT INTO user_subscriptions (user_id, plan_id, start_date)
+            VALUES (%s, %s, %s)
         """, (user["id"], request.plan_id, next_month))
         
         # users 테이블의 plan_id도 업데이트 (즉시 반영)
@@ -343,7 +343,7 @@ async def change_plan(
         cursor.close()
         conn.close()
 
-@router.post("/api/billing/purchase-plan", response_model=PaymentResponse)
+@router.post("/purchase-plan", response_model=PaymentResponse)
 async def purchase_plan(
     request: PaymentRequest,
     user=Depends(get_current_user_from_request)
@@ -373,9 +373,9 @@ async def purchase_plan(
         
         # 결제 로그 기록
         cursor.execute("""
-            INSERT INTO payment_logs (user_id, plan_id, amount, payment_method, payment_id, status)
-            VALUES (%s, %s, %s, %s, %s, 'completed')
-        """, (user["id"], request.plan_id, plan[2], request.payment_method, payment_id))
+            INSERT INTO payment_logs (user_id, plan_id, amount, paid_at)
+            VALUES (%s, %s, %s, NOW())
+        """, (user["id"], request.plan_id, plan[2]))
         
         # 플랜 즉시 변경 (결제 완료 시)
         cursor.execute("""
@@ -384,8 +384,8 @@ async def purchase_plan(
         
         # 활성 구독 생성
         cursor.execute("""
-            INSERT INTO user_subscriptions (user_id, plan_id, start_date, status)
-            VALUES (%s, %s, CURDATE(), 'active')
+            INSERT INTO user_subscriptions (user_id, plan_id, start_date)
+            VALUES (%s, %s, CURDATE())
         """, (user["id"], request.plan_id))
         
         conn.commit()
@@ -407,7 +407,7 @@ async def purchase_plan(
         cursor.close()
         conn.close()
 
-@router.get("/api/billing/usage-stats")
+@router.get("/usage-stats")
 async def get_usage_stats(user=Depends(get_current_user_from_request)):
     """사용량 통계 조회 (실시간 + 지난달)"""
     conn = get_db_connection()
