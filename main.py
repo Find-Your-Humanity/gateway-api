@@ -92,32 +92,32 @@ async def startup_event():
     
     # 데이터베이스 연결 테스트
     if test_connection():
-        print("✅ 데이터베이스 연결 성공!")
+        print("데이터베이스 연결 성공!")
         # 데이터베이스 초기화 (테이블 생성)
         try:
             init_database()
         except Exception as e:
-            print(f"⚠️ 데이터베이스 초기화 실패: {e}")
+            print(f"데이터베이스 초기화 실패: {e}")
         # 만료 토큰 정리 1회 수행 및 주기 실행
         try:
             deleted = cleanup_password_reset_tokens()
             if deleted:
-                print(f"🧹 만료/사용 토큰 정리: {deleted}건 삭제")
+                print(f"만료/사용 토큰 정리: {deleted}건 삭제")
             deleted_codes = cleanup_password_reset_codes()
             if deleted_codes:
-                print(f"🧹 만료/사용 코드 정리: {deleted_codes}건 삭제")
+                print(f"만료/사용 코드 정리: {deleted_codes}건 삭제")
         except Exception as e:
-            print(f"⚠️ 토큰/코드 정리 실패: {e}")
+            print(f"토큰/코드 정리 실패: {e}")
 
         async def periodic_cleanup():
             while True:
                 try:
                     deleted = cleanup_password_reset_tokens()
                     if deleted:
-                        print(f"🧹(주기) 만료/사용 토큰 정리: {deleted}건 삭제")
+                        print(f"(주기) 만료/사용 토큰 정리: {deleted}건 삭제")
                     deleted_codes = cleanup_password_reset_codes()
                     if deleted_codes:
-                        print(f"🧹(주기) 만료/사용 코드 정리: {deleted_codes}건 삭제")
+                        print(f"(주기) 만료/사용 코드 정리: {deleted_codes}건 삭제")
                     # 집계 작업 수행
                     a = aggregate_request_statistics(30)
                     e = aggregate_error_stats_daily(30)

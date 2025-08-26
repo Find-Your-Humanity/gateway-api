@@ -561,7 +561,10 @@ def get_current_user(request: Request, response: Response):
 
         return {
             "success": True,
-            "user": user
+            "data": {
+                "user": user,
+                "access_token": request.cookies.get("captcha_token") or request.headers.get("authorization", "").replace("Bearer ", "")
+            }
         }
     except HTTPException:
         raise
