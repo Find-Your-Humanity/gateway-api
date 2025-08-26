@@ -163,7 +163,7 @@ async def get_available_plans():
                 print(f"🔍 plans 테이블 조회 시작...")
                 
                 cursor.execute("""
-                    SELECT id, name, price, request_limit, description, features, 
+                    SELECT id, name, price, monthly_request_limit, description, features, 
                            rate_limit_per_minute, is_popular, sort_order
                     FROM plans 
                     WHERE is_active = 1 
@@ -195,7 +195,7 @@ async def get_available_plans():
                             "id": row[0],
                             "name": row[1],
                             "price": float(row[2]),
-                            "request_limit": row[3],
+                            "request_limit": row[3] or 0,  # monthly_request_limit을 request_limit로 매핑
                             "description": row[4],
                             "features": features_dict,
                             "rate_limit_per_minute": row[6],
@@ -240,7 +240,7 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                 
                 # 현재 사용자의 플랜 정보 조회 (users.plan_id 우선)
                 cursor.execute("""
-                    SELECT p.id, p.name, p.price, p.request_limit, p.description, p.features,
+                    SELECT p.id, p.name, p.price, p.monthly_request_limit, p.description, p.features,
                            p.rate_limit_per_minute, p.is_popular, p.sort_order
                     FROM users u
                     JOIN plans p ON u.plan_id = p.id
@@ -251,22 +251,31 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                 print(f"✅ 사용자 플랜 조회: {user_plan}")
                 
                 if not user_plan:
-                    # 플랜이 없으면 Demo 플랜으로 처리
+                    # 플랜이 없으면 기본 플랜으로 처리
                     cursor.execute("""
-                        SELECT id, name, price, request_limit, description, features,
+                        SELECT id, name, price, monthly_request_limit, description, features,
                                rate_limit_per_minute, is_popular, sort_order
                         FROM plans WHERE name = 'free'
                     """)
                     user_plan = cursor.fetchone()
                     print(f"✅ 기본 플랜 조회: {user_plan}")
                     
-                    # Demo 플랜도 없으면 기본값 생성
+                    # 기본 플랜도 없으면 첫 번째 플랜 사용
                     if not user_plan:
-                        print("❌ 기본 요금제를 찾을 수 없습니다.")
-                        raise HTTPException(
-                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="기본 요금제를 찾을 수 없습니다."
-                        )
+                        cursor.execute("""
+                            SELECT id, name, price, monthly_request_limit, description, features,
+                                   rate_limit_per_minute, is_popular, sort_order
+                            FROM plans WHERE is_active = 1 ORDER BY sort_order LIMIT 1
+                        """)
+                        user_plan = cursor.fetchone()
+                        print(f"✅ 첫 번째 플랜 조회: {user_plan}")
+                        
+                        if not user_plan:
+                            print("❌ 기본 요금제를 찾을 수 없습니다.")
+                            raise HTTPException(
+                                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="기본 요금제를 찾을 수 없습니다."
+                            )
                 
                 # features 컬럼 안전 파싱
                 raw_features = user_plan[5]
@@ -285,7 +294,7 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                     "id": user_plan[0],
                     "name": user_plan[1],
                     "price": float(user_plan[2]),
-                    "request_limit": user_plan[3],
+                    "request_limit": user_plan[3] or 0,  # monthly_request_limit을 request_limit로 매핑
                     "description": user_plan[4],
                     "features": features_dict,
                     "rate_limit_per_minute": user_plan[6],
