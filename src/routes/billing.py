@@ -180,7 +180,7 @@ async def get_available_plans():
                     try:
                         print(f"🔍 행 처리 중: {row}")
                         # features 컬럼은 JSON 또는 빈 문자열/NULL일 수 있으므로 안전하게 파싱
-                        raw_features = row[5]
+                        raw_features = row['features']
                         features_dict = {}
                         if raw_features is not None:
                             try:
@@ -190,19 +190,19 @@ async def get_available_plans():
                                     features_dict = json.loads(text_features)
                                     print(f"✅ features 파싱 성공: {features_dict}")
                             except Exception as e:
-                                print(f"⚠️ features 파싱 오류 (row {row[0]}): {e}")
+                                print(f"⚠️ features 파싱 오류 (row {row['id']}): {e}")
                                 features_dict = {}
                         
                         plan = {
-                            "id": row[0],
-                            "name": row[1],
-                            "price": float(row[2]),
-                            "request_limit": row[3] or 0,  # monthly_request_limit을 request_limit로 매핑
-                            "description": row[4],
+                            "id": row['id'],
+                            "name": row['name'],
+                            "price": float(row['price']),
+                            "request_limit": row['monthly_request_limit'] or 0,  # monthly_request_limit을 request_limit로 매핑
+                            "description": row['description'],
                             "features": features_dict,
-                            "rate_limit_per_minute": row[6],
-                            "is_popular": bool(row[7]),
-                            "sort_order": row[8]
+                            "rate_limit_per_minute": row['rate_limit_per_minute'],
+                            "is_popular": bool(row['is_popular']),
+                            "sort_order": row['sort_order']
                         }
                         print(f"✅ 플랜 생성 완료: {plan['name']}")
                         plans.append(plan)
@@ -281,7 +281,7 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                             )
                 
                 # features 컬럼 안전 파싱
-                raw_features = user_plan[5]
+                raw_features = user_plan['features']
                 features_dict = {}
                 if raw_features is not None:
                     try:
@@ -294,15 +294,15 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                         features_dict = {}
 
                 plan = {
-                    "id": user_plan[0],
-                    "name": user_plan[1],
-                    "price": float(user_plan[2]),
-                    "request_limit": user_plan[3] or 0,  # monthly_request_limit을 request_limit로 매핑
-                    "description": user_plan[4],
+                    "id": user_plan['id'],
+                    "name": user_plan['name'],
+                    "price": float(user_plan['price']),
+                    "request_limit": user_plan['monthly_request_limit'] or 0,  # monthly_request_limit을 request_limit로 매핑
+                    "description": user_plan['description'],
                     "features": features_dict,
-                    "rate_limit_per_minute": user_plan[6],
-                    "is_popular": bool(user_plan[7]),
-                    "sort_order": user_plan[8]
+                    "rate_limit_per_minute": user_plan['rate_limit_per_minute'],
+                    "is_popular": bool(user_plan['is_popular']),
+                    "sort_order": user_plan['sort_order']
                 }
                 
                 print(f"✅ 플랜 정보 파싱 완료: {plan['name']}")
