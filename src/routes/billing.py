@@ -178,6 +178,7 @@ async def get_available_plans():
                 
                 for row in rows:
                     try:
+                        print(f"🔍 행 처리 중: {row}")
                         # features 컬럼은 JSON 또는 빈 문자열/NULL일 수 있으므로 안전하게 파싱
                         raw_features = row[5]
                         features_dict = {}
@@ -187,6 +188,7 @@ async def get_available_plans():
                                 text_features = text_features.strip()
                                 if text_features:
                                     features_dict = json.loads(text_features)
+                                    print(f"✅ features 파싱 성공: {features_dict}")
                             except Exception as e:
                                 print(f"⚠️ features 파싱 오류 (row {row[0]}): {e}")
                                 features_dict = {}
@@ -202,6 +204,7 @@ async def get_available_plans():
                             "is_popular": bool(row[7]),
                             "sort_order": row[8]
                         }
+                        print(f"✅ 플랜 생성 완료: {plan['name']}")
                         plans.append(plan)
                     except Exception as e:
                         print(f"❌ 행 처리 오류 (row {row}): {e}")
