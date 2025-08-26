@@ -101,6 +101,58 @@ async def test_database_connection():
             "message": "데이터베이스 연결 실패"
         }
 
+@router.get("/test-sql")
+async def test_sql_query():
+    """SQL 쿼리 테스트"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                
+                # 1. 모든 plans 데이터 조회
+                cursor.execute("SELECT * FROM plans")
+                all_plans = cursor.fetchall()
+                print(f"✅ 모든 plans: {len(all_plans)}개")
+                
+                # 2. is_active = 1 조건으로 조회
+                cursor.execute("SELECT * FROM plans WHERE is_active = 1")
+                active_plans = cursor.fetchall()
+                print(f"✅ is_active = 1: {len(active_plans)}개")
+                
+                # 3. is_active = TRUE 조건으로 조회
+                cursor.execute("SELECT * FROM plans WHERE is_active = TRUE")
+                true_plans = cursor.fetchall()
+                print(f"✅ is_active = TRUE: {len(true_plans)}개")
+                
+                # 4. is_active = FALSE 조건으로 조회
+                cursor.execute("SELECT * FROM plans WHERE is_active = FALSE")
+                false_plans = cursor.fetchall()
+                print(f"✅ is_active = FALSE: {len(false_plans)}개")
+                
+                # 5. is_active = 0 조건으로 조회
+                cursor.execute("SELECT * FROM plans WHERE is_active = 0")
+                zero_plans = cursor.fetchall()
+                print(f"✅ is_active = 0: {len(zero_plans)}개")
+                
+                return {
+                    "success": True,
+                    "all_plans_count": len(all_plans),
+                    "active_plans_count": len(active_plans),
+                    "true_plans_count": len(true_plans),
+                    "false_plans_count": len(false_plans),
+                    "zero_plans_count": len(zero_plans),
+                    "active_plans": active_plans
+                }
+        
+    except Exception as e:
+        print(f"❌ SQL 테스트 오류: {e}")
+        import traceback
+        print(f"❌ 스택 트레이스: {traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "SQL 테스트 실패"
+        }
+
 @router.get("/plans", response_model=List[PlanResponse])
 async def get_available_plans():
     """사용 가능한 요금제 목록 조회"""
