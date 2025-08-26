@@ -422,7 +422,8 @@ def get_plans(
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 구독자 수 포함한 요금제 목록 조회
+                # 구독자 수 집계 기준을 통일: users.plan_id + 활성 계정 기준
+                # 추가 지표: active_subscribers (user_subscriptions.status='active')
                 query = """
                     SELECT 
                         p.id, p.name, p.display_name, p.description, p.plan_type,
@@ -431,10 +432,19 @@ def get_plans(
                         p.features, p.rate_limit_per_minute,
                         p.is_active, p.is_popular, p.sort_order,
                         p.created_at, p.updated_at,
-                        COUNT(us.id) as subscriber_count
+                        /* 현재 활성 사용자 기준 구독자 수 */
+                        (
+                            SELECT COUNT(*) 
+                            FROM users u 
+                            WHERE u.plan_id = p.id AND (u.is_active = 1 OR u.is_active = TRUE)
+                        ) AS subscriber_count,
+                        /* 활성 구독(결제 관점) 수 */
+                        (
+                            SELECT COUNT(*) 
+                            FROM user_subscriptions us 
+                            WHERE us.plan_id = p.id AND us.status = 'active'
+                        ) AS active_subscribers
                     FROM plans p
-                    LEFT JOIN user_subscriptions us ON p.id = us.plan_id AND us.status = 'active'
-                    GROUP BY p.id
                     ORDER BY p.sort_order, p.id
                 """
                 cursor.execute(query)
