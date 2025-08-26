@@ -77,10 +77,18 @@ async def test_database_connection():
                 count_result = cursor.fetchone()
                 print(f"✅ plans 테이블 데이터: {count_result['count']}개")
                 
+                # 5. plans 테이블 상세 데이터 확인
+                cursor.execute("SELECT id, name, is_active FROM plans")
+                plans_data = cursor.fetchall()
+                print(f"✅ plans 테이블 상세:")
+                for plan in plans_data:
+                    print(f"  - ID: {plan['id']}, Name: {plan['name']}, Active: {plan['is_active']}")
+                
                 return {
                     "success": True,
                     "message": "데이터베이스 연결 성공",
-                    "plans_count": count_result['count'] if count_result else 0
+                    "plans_count": count_result['count'] if count_result else 0,
+                    "plans_data": plans_data
                 }
         
     except Exception as e:
