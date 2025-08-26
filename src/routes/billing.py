@@ -338,9 +338,9 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                 """, (user["id"], current_month))
                 
                 usage_data = cursor.fetchone()
-                total_calls = usage_data[0] if usage_data else 0
-                success_calls = usage_data[1] if usage_data else 0
-                failed_calls = usage_data[2] if usage_data else 0
+                total_calls = usage_data['total_calls'] if usage_data else 0
+                success_calls = usage_data['success_calls'] if usage_data else 0
+                failed_calls = usage_data['failed_calls'] if usage_data else 0
                 print(f"✅ 사용량 정보: 총 {total_calls}회, 성공 {success_calls}회, 실패 {failed_calls}회")
                 
                 current_usage = {
