@@ -223,136 +223,167 @@ async def get_available_plans():
 @router.get("/current-plan", response_model=CurrentPlanResponse)
 async def get_current_plan(user=Depends(get_current_user_from_request)):
     """현재 사용자의 요금제 정보 조회"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
     try:
-        # 현재 사용자의 플랜 정보 조회 (users.plan_id 우선)
-        cursor.execute("""
-            SELECT p.id, p.name, p.price, p.request_limit, p.description, p.features,
-                   p.rate_limit_per_minute, p.is_popular, p.sort_order
-            FROM users u
-            JOIN plans p ON u.plan_id = p.id
-            WHERE u.id = %s
-        """, (user["id"],))
+        print(f"🔍 get_current_plan 호출됨 - 사용자 ID: {user.get('id') if user else 'None'}")
         
-        user_plan = cursor.fetchone()
+        if not user:
+            print("❌ 사용자 정보가 없습니다.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="인증이 필요합니다."
+            )
         
-        if not user_plan:
-            # 플랜이 없으면 Demo 플랜으로 처리
-            cursor.execute("""
-                SELECT id, name, price, request_limit, description, features,
-                       rate_limit_per_minute, is_popular, sort_order
-                FROM plans WHERE name = 'Demo'
-            """)
-            user_plan = cursor.fetchone()
-            
-            # Demo 플랜도 없으면 기본값 생성
-            if not user_plan:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="기본 요금제를 찾을 수 없습니다."
-                )
-        
-        # features 컬럼 안전 파싱
-        raw_features = user_plan[5]
-        features_dict = {}
-        if raw_features is not None:
-            try:
-                text_features = raw_features.decode("utf-8") if isinstance(raw_features, (bytes, bytearray, memoryview)) else str(raw_features)
-                text_features = text_features.strip()
-                if text_features:
-                    features_dict = json.loads(text_features)
-            except Exception:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                
+                print(f"✅ 데이터베이스 연결 성공")
+                
+                # 현재 사용자의 플랜 정보 조회 (users.plan_id 우선)
+                cursor.execute("""
+                    SELECT p.id, p.name, p.price, p.request_limit, p.description, p.features,
+                           p.rate_limit_per_minute, p.is_popular, p.sort_order
+                    FROM users u
+                    JOIN plans p ON u.plan_id = p.id
+                    WHERE u.id = %s
+                """, (user["id"],))
+                
+                user_plan = cursor.fetchone()
+                print(f"✅ 사용자 플랜 조회: {user_plan}")
+                
+                if not user_plan:
+                    # 플랜이 없으면 Demo 플랜으로 처리
+                    cursor.execute("""
+                        SELECT id, name, price, request_limit, description, features,
+                               rate_limit_per_minute, is_popular, sort_order
+                        FROM plans WHERE name = 'free'
+                    """)
+                    user_plan = cursor.fetchone()
+                    print(f"✅ 기본 플랜 조회: {user_plan}")
+                    
+                    # Demo 플랜도 없으면 기본값 생성
+                    if not user_plan:
+                        print("❌ 기본 요금제를 찾을 수 없습니다.")
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="기본 요금제를 찾을 수 없습니다."
+                        )
+                
+                # features 컬럼 안전 파싱
+                raw_features = user_plan[5]
                 features_dict = {}
+                if raw_features is not None:
+                    try:
+                        text_features = raw_features.decode("utf-8") if isinstance(raw_features, (bytes, bytearray, memoryview)) else str(raw_features)
+                        text_features = text_features.strip()
+                        if text_features:
+                            features_dict = json.loads(text_features)
+                    except Exception as e:
+                        print(f"⚠️ features 파싱 오류: {e}")
+                        features_dict = {}
 
-        plan = {
-            "id": user_plan[0],
-            "name": user_plan[1],
-            "price": float(user_plan[2]),
-            "request_limit": user_plan[3],
-            "description": user_plan[4],
-            "features": features_dict,
-            "rate_limit_per_minute": user_plan[6],
-            "is_popular": bool(user_plan[7]),
-            "sort_order": user_plan[8]
-        }
-        
-        # 활성 구독 정보 조회 (시작일, 종료일)
-        cursor.execute("""
-            SELECT start_date, end_date
-            FROM user_subscriptions
-            WHERE user_id = %s AND start_date <= CURDATE()
-            ORDER BY start_date DESC
-            LIMIT 1
-        """, (user["id"],))
-        
-        subscription = cursor.fetchone()
-        start_date = subscription[0] if subscription else None
-        end_date = subscription[1] if subscription else None
-        
-        # 이번 달 사용량 조회 (request_logs 테이블 사용)
-        current_month = date.today().replace(day=1)
-        cursor.execute("""
-            SELECT COUNT(*) as total_calls,
-                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls,
-                   COUNT(CASE WHEN status_code != 200 THEN 1 END) as failed_calls
-            FROM request_logs
-            WHERE user_id = %s AND request_time >= %s
-        """, (user["id"], current_month))
-        
-        usage_data = cursor.fetchone()
-        total_calls = usage_data[0] if usage_data else 0
-        success_calls = usage_data[1] if usage_data else 0
-        failed_calls = usage_data[2] if usage_data else 0
-        
-        current_usage = {
-            "tokens_used": total_calls,  # 요청 수를 토큰 사용량으로 간주
-            "api_calls": total_calls,
-            "overage_tokens": max(0, total_calls - plan["request_limit"]),
-            "overage_cost": 0,  # 초기에는 과금 없음
-            "tokens_limit": plan["request_limit"],
-            "average_tokens_per_call": 1,  # 요청당 1토큰으로 간주
-            "success_rate": (success_calls / total_calls * 100) if total_calls > 0 else 0
-        }
-        
-        # 청구 정보
-        billing_info = {
-            "base_fee": plan["price"],
-            "overage_fee": current_usage["overage_cost"],
-            "total_amount": plan["price"] + current_usage["overage_cost"],
-            "start_date": start_date.isoformat() if start_date else None,
-            "end_date": end_date.isoformat() if end_date else None
-        }
-        
-        # 예정된 변경사항 확인
-        cursor.execute("""
-            SELECT us.plan_id, p.name, us.start_date
-            FROM user_subscriptions us
-            JOIN plans p ON us.plan_id = p.id
-            WHERE us.user_id = %s AND us.start_date > CURDATE()
-            ORDER BY us.start_date ASC
-            LIMIT 1
-        """, (user["id"],))
-        
-        pending_change = cursor.fetchone()
-        pending_changes = None
-        if pending_change:
-            pending_changes = {
-                "plan_id": pending_change[0],
-                "plan_name": pending_change[1],
-                "effective_date": pending_change[2].isoformat()
-            }
-        
-        return {
-            "plan": plan,
-            "current_usage": current_usage,
-            "billing_info": billing_info,
-            "pending_changes": pending_changes
-        }
-    finally:
-        cursor.close()
-        conn.close()
+                plan = {
+                    "id": user_plan[0],
+                    "name": user_plan[1],
+                    "price": float(user_plan[2]),
+                    "request_limit": user_plan[3],
+                    "description": user_plan[4],
+                    "features": features_dict,
+                    "rate_limit_per_minute": user_plan[6],
+                    "is_popular": bool(user_plan[7]),
+                    "sort_order": user_plan[8]
+                }
+                
+                print(f"✅ 플랜 정보 파싱 완료: {plan['name']}")
+                
+                # 활성 구독 정보 조회 (시작일, 종료일)
+                cursor.execute("""
+                    SELECT start_date, end_date
+                    FROM user_subscriptions
+                    WHERE user_id = %s AND start_date <= CURDATE()
+                    ORDER BY start_date DESC
+                    LIMIT 1
+                """, (user["id"],))
+                
+                subscription = cursor.fetchone()
+                start_date = subscription[0] if subscription else None
+                end_date = subscription[1] if subscription else None
+                print(f"✅ 구독 정보: {start_date} ~ {end_date}")
+                
+                # 이번 달 사용량 조회 (request_logs 테이블 사용)
+                current_month = date.today().replace(day=1)
+                cursor.execute("""
+                    SELECT COUNT(*) as total_calls,
+                           COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls,
+                           COUNT(CASE WHEN status_code != 200 THEN 1 END) as failed_calls
+                    FROM request_logs
+                    WHERE user_id = %s AND request_time >= %s
+                """, (user["id"], current_month))
+                
+                usage_data = cursor.fetchone()
+                total_calls = usage_data[0] if usage_data else 0
+                success_calls = usage_data[1] if usage_data else 0
+                failed_calls = usage_data[2] if usage_data else 0
+                print(f"✅ 사용량 정보: 총 {total_calls}회, 성공 {success_calls}회, 실패 {failed_calls}회")
+                
+                current_usage = {
+                    "tokens_used": total_calls,  # 요청 수를 토큰 사용량으로 간주
+                    "api_calls": total_calls,
+                    "overage_tokens": max(0, total_calls - plan["request_limit"]),
+                    "overage_cost": 0,  # 초기에는 과금 없음
+                    "tokens_limit": plan["request_limit"],
+                    "average_tokens_per_call": 1,  # 요청당 1토큰으로 간주
+                    "success_rate": (success_calls / total_calls * 100) if total_calls > 0 else 0
+                }
+                
+                # 청구 정보
+                billing_info = {
+                    "base_fee": plan["price"],
+                    "overage_fee": current_usage["overage_cost"],
+                    "total_amount": plan["price"] + current_usage["overage_cost"],
+                    "start_date": start_date.isoformat() if start_date else None,
+                    "end_date": end_date.isoformat() if end_date else None
+                }
+                
+                # 예정된 변경사항 확인
+                cursor.execute("""
+                    SELECT us.plan_id, p.name, us.start_date
+                    FROM user_subscriptions us
+                    JOIN plans p ON us.plan_id = p.id
+                    WHERE us.user_id = %s AND us.start_date > CURDATE()
+                    ORDER BY us.start_date ASC
+                    LIMIT 1
+                """, (user["id"],))
+                
+                pending_change = cursor.fetchone()
+                pending_changes = None
+                if pending_change:
+                    pending_changes = {
+                        "plan_id": pending_change[0],
+                        "plan_name": pending_change[1],
+                        "effective_date": pending_change[2].isoformat()
+                    }
+                
+                result = {
+                    "plan": plan,
+                    "current_usage": current_usage,
+                    "billing_info": billing_info,
+                    "pending_changes": pending_changes
+                }
+                
+                print(f"✅ get_current_plan 완료: {plan['name']} 플랜")
+                return result
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ get_current_plan 오류: {e}")
+        print(f"❌ 오류 타입: {type(e)}")
+        import traceback
+        print(f"❌ 스택 트레이스: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"현재 요금제 조회 중 오류가 발생했습니다: {str(e)}"
+        )
 
 @router.get("/usage", response_model=List[UsageResponse])
 async def get_usage_history(
