@@ -164,32 +164,36 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
         start_date = subscription[0] if subscription else None
         end_date = subscription[1] if subscription else None
         
-        # 이번 달 사용량 조회
+        # 이번 달 사용량 조회 (request_logs 테이블 사용)
         current_month = date.today().replace(day=1)
         cursor.execute("""
-            SELECT COALESCE(SUM(tokens_used), 0) as total_tokens,
-                   COALESCE(SUM(api_calls), 0) as total_calls,
-                   COALESCE(SUM(overage_tokens), 0) as overage_tokens,
-                   COALESCE(SUM(overage_cost), 0) as overage_cost
-            FROM usage_tracking
-            WHERE user_id = %s AND date >= %s
+            SELECT COUNT(*) as total_calls,
+                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls,
+                   COUNT(CASE WHEN status_code != 200 THEN 1 END) as failed_calls
+            FROM request_logs
+            WHERE user_id = %s AND request_time >= %s
         """, (user["id"], current_month))
         
         usage_data = cursor.fetchone()
+        total_calls = usage_data[0] if usage_data else 0
+        success_calls = usage_data[1] if usage_data else 0
+        failed_calls = usage_data[2] if usage_data else 0
+        
         current_usage = {
-            "tokens_used": usage_data[0],
-            "api_calls": usage_data[1],
-            "overage_tokens": usage_data[2],
-            "overage_cost": float(usage_data[3]),
+            "tokens_used": total_calls,  # 요청 수를 토큰 사용량으로 간주
+            "api_calls": total_calls,
+            "overage_tokens": max(0, total_calls - plan["request_limit"]),
+            "overage_cost": 0,  # 초기에는 과금 없음
             "tokens_limit": plan["request_limit"],
-            "average_tokens_per_call": usage_data[1] > 0 and usage_data[0] / usage_data[1] or 0
+            "average_tokens_per_call": 1,  # 요청당 1토큰으로 간주
+            "success_rate": (success_calls / total_calls * 100) if total_calls > 0 else 0
         }
         
         # 청구 정보
         billing_info = {
             "base_fee": plan["price"],
-            "overage_fee": float(usage_data[3]),
-            "total_amount": plan["price"] + float(usage_data[3]),
+            "overage_fee": current_usage["overage_cost"],
+            "total_amount": plan["price"] + current_usage["overage_cost"],
             "start_date": start_date.isoformat() if start_date else None,
             "end_date": end_date.isoformat() if end_date else None
         }
@@ -235,20 +239,22 @@ async def get_usage_history(
     
     try:
         query = """
-            SELECT date, tokens_used, api_calls, overage_tokens, overage_cost
-            FROM usage_tracking
+            SELECT DATE(request_time) as date, 
+                   COUNT(*) as api_calls,
+                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls
+            FROM request_logs
             WHERE user_id = %s
         """
         params = [user["id"]]
         
         if start_date:
-            query += " AND date >= %s"
+            query += " AND DATE(request_time) >= %s"
             params.append(start_date)
         if end_date:
-            query += " AND date <= %s"
+            query += " AND DATE(request_time) <= %s"
             params.append(end_date)
         
-        query += " ORDER BY date DESC LIMIT 30"
+        query += " GROUP BY DATE(request_time) ORDER BY date DESC LIMIT 30"
         
         cursor.execute(query, params)
         
@@ -256,10 +262,10 @@ async def get_usage_history(
         for row in cursor.fetchall():
             usage_history.append({
                 "date": row[0].isoformat(),
-                "tokens_used": row[1],
-                "api_calls": row[2],
-                "overage_tokens": row[3],
-                "overage_cost": float(row[4])
+                "tokens_used": row[1],  # api_calls를 tokens_used로 사용
+                "api_calls": row[1],
+                "overage_tokens": 0,  # 초기에는 과금 없음
+                "overage_cost": 0.0
             })
         
         return usage_history
@@ -411,11 +417,10 @@ async def get_usage_stats(user=Depends(get_current_user_from_request)):
         # 이번 달 사용량
         current_month = date.today().replace(day=1)
         cursor.execute("""
-            SELECT COALESCE(SUM(tokens_used), 0) as total_tokens,
-                   COALESCE(SUM(api_calls), 0) as total_calls,
-                   COALESCE(SUM(overage_cost), 0) as overage_cost
-            FROM usage_tracking
-            WHERE user_id = %s AND date >= %s
+            SELECT COUNT(*) as total_calls,
+                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls
+            FROM request_logs
+            WHERE user_id = %s AND request_time >= %s
         """, (user["id"], current_month))
         
         current_usage = cursor.fetchone()
@@ -427,25 +432,24 @@ async def get_usage_stats(user=Depends(get_current_user_from_request)):
             last_month = date(current_month.year, current_month.month - 1, 1)
         
         cursor.execute("""
-            SELECT COALESCE(SUM(tokens_used), 0) as total_tokens,
-                   COALESCE(SUM(api_calls), 0) as total_calls,
-                   COALESCE(SUM(overage_cost), 0) as overage_cost
-            FROM usage_tracking
-            WHERE user_id = %s AND date >= %s AND date < %s
+            SELECT COUNT(*) as total_calls,
+                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls
+            FROM request_logs
+            WHERE user_id = %s AND request_time >= %s AND request_time < %s
         """, (user["id"], last_month, current_month))
         
         last_month_usage = cursor.fetchone()
         
         return {
             "current_month": {
-                "tokens_used": current_usage[0],
-                "api_calls": current_usage[1],
-                "overage_cost": float(current_usage[2])
+                "tokens_used": current_usage[0] if current_usage else 0,
+                "api_calls": current_usage[0] if current_usage else 0,
+                "overage_cost": 0.0
             },
             "last_month": {
-                "tokens_used": last_month_usage[0],
-                "api_calls": last_month_usage[1],
-                "overage_cost": float(last_month_usage[2])
+                "tokens_used": last_month_usage[0] if last_month_usage else 0,
+                "api_calls": last_month_usage[0] if last_month_usage else 0,
+                "overage_cost": 0.0
             }
         }
     finally:
