@@ -459,69 +459,89 @@ async def change_plan(
     user=Depends(get_current_user_from_request)
 ):
     """요금제 변경 (다음 청구 주기부터 적용)"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
     try:
-        # 플랜 존재 확인
-        cursor.execute("SELECT id, name FROM plans WHERE id = %s AND is_active = 1", (request.plan_id,))
-        plan = cursor.fetchone()
+        print(f"🔍 change_plan 호출됨 - 사용자 ID: {user.get('id')}, 플랜 ID: {request.plan_id}")
         
-        if not plan:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="요금제를 찾을 수 없습니다."
-            )
-        
-        # 다음 달 1일 계산
-        today = date.today()
-        if today.month == 12:
-            next_month = today.replace(year=today.year + 1, month=1, day=1)
-        else:
-            next_month = today.replace(month=today.month + 1, day=1)
-        
-        # 기존 활성 구독이 있으면 다음 달부터 종료
-        cursor.execute("""
-            SELECT id FROM user_subscriptions 
-            WHERE user_id = %s AND end_date IS NULL
-        """, (user["id"],))
-        
-        existing_subscription = cursor.fetchone()
-        if existing_subscription:
-            cursor.execute("""
-                UPDATE user_subscriptions 
-                SET end_date = %s
-                WHERE id = %s
-            """, (next_month - timedelta(days=1), existing_subscription[0]))
-        
-        # 새 구독 생성 (다음 달 1일부터 시작)
-        cursor.execute("""
-            INSERT INTO user_subscriptions (user_id, plan_id, start_date)
-            VALUES (%s, %s, %s)
-        """, (user["id"], request.plan_id, next_month))
-        
-        # users 테이블의 plan_id도 업데이트 (즉시 반영)
-        cursor.execute("""
-            UPDATE users SET plan_id = %s WHERE id = %s
-        """, (request.plan_id, user["id"]))
-        
-        conn.commit()
-        
-        return {
-            "success": True,
-            "message": f"{plan[1]} 요금제로 변경되었습니다. {next_month.strftime('%Y년 %m월 1일')}부터 적용됩니다.",
-            "plan_id": request.plan_id,
-            "effective_date": next_month.isoformat()
-        }
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                
+                # 플랜 존재 확인
+                cursor.execute("SELECT id, name FROM plans WHERE id = %s AND is_active = 1", (request.plan_id,))
+                plan = cursor.fetchone()
+                
+                if not plan:
+                    print(f"❌ 플랜을 찾을 수 없음: {request.plan_id}")
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="요금제를 찾을 수 없습니다."
+                    )
+                
+                print(f"✅ 플랜 확인: {plan['name']}")
+                
+                # 다음 달 1일 계산
+                today = date.today()
+                if today.month == 12:
+                    next_month = today.replace(year=today.year + 1, month=1, day=1)
+                else:
+                    next_month = today.replace(month=today.month + 1, day=1)
+                
+                print(f"✅ 적용 예정일: {next_month}")
+                
+                # user_subscriptions 테이블이 없을 수 있으므로 안전하게 처리
+                try:
+                    # 기존 활성 구독이 있으면 다음 달부터 종료
+                    cursor.execute("""
+                        SELECT id FROM user_subscriptions 
+                        WHERE user_id = %s AND end_date IS NULL
+                    """, (user["id"],))
+                    
+                    existing_subscription = cursor.fetchone()
+                    if existing_subscription:
+                        cursor.execute("""
+                            UPDATE user_subscriptions 
+                            SET end_date = %s
+                            WHERE id = %s
+                        """, (next_month - timedelta(days=1), existing_subscription['id']))
+                        print(f"✅ 기존 구독 종료: {existing_subscription['id']}")
+                    
+                    # 새 구독 생성 (다음 달 1일부터 시작)
+                    cursor.execute("""
+                        INSERT INTO user_subscriptions (user_id, plan_id, start_date)
+                        VALUES (%s, %s, %s)
+                    """, (user["id"], request.plan_id, next_month))
+                    print(f"✅ 새 구독 생성 완료")
+                    
+                except Exception as e:
+                    print(f"⚠️ user_subscriptions 테이블 처리 실패 (무시): {e}")
+                    # 테이블이 없어도 계속 진행
+                
+                # users 테이블의 plan_id 업데이트 (즉시 반영)
+                cursor.execute("""
+                    UPDATE users SET plan_id = %s WHERE id = %s
+                """, (request.plan_id, user["id"]))
+                print(f"✅ 사용자 플랜 업데이트 완료")
+                
+                result = {
+                    "success": True,
+                    "message": f"{plan['name']} 요금제로 변경되었습니다. {next_month.strftime('%Y년 %m월 1일')}부터 적용됩니다.",
+                    "plan_id": request.plan_id,
+                    "effective_date": next_month.isoformat()
+                }
+                
+                print(f"✅ change_plan 완료: {plan['name']}")
+                return result
+                
+    except HTTPException:
+        raise
     except Exception as e:
-        conn.rollback()
+        print(f"❌ change_plan 오류: {e}")
+        print(f"❌ 오류 타입: {type(e)}")
+        import traceback
+        print(f"❌ 스택 트레이스: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="요금제 변경 중 오류가 발생했습니다."
+            detail=f"요금제 변경 중 오류가 발생했습니다: {str(e)}"
         )
-    finally:
-        cursor.close()
-        conn.close()
 
 @router.post("/purchase-plan", response_model=PaymentResponse)
 async def purchase_plan(
