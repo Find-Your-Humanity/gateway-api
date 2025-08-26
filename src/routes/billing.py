@@ -304,19 +304,25 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                 
                 print(f"✅ 플랜 정보 파싱 완료: {plan['name']}")
                 
-                # 활성 구독 정보 조회 (시작일, 종료일)
-                cursor.execute("""
-                    SELECT start_date, end_date
-                    FROM user_subscriptions
-                    WHERE user_id = %s AND start_date <= CURDATE()
-                    ORDER BY start_date DESC
-                    LIMIT 1
-                """, (user["id"],))
-                
-                subscription = cursor.fetchone()
-                start_date = subscription[0] if subscription else None
-                end_date = subscription[1] if subscription else None
-                print(f"✅ 구독 정보: {start_date} ~ {end_date}")
+                # 활성 구독 정보 조회 (시작일, 종료일) - user_subscriptions 테이블이 없을 수 있으므로 안전하게 처리
+                start_date = None
+                end_date = None
+                try:
+                    cursor.execute("""
+                        SELECT start_date, end_date
+                        FROM user_subscriptions
+                        WHERE user_id = %s AND start_date <= CURDATE()
+                        ORDER BY start_date DESC
+                        LIMIT 1
+                    """, (user["id"],))
+                    
+                    subscription = cursor.fetchone()
+                    start_date = subscription[0] if subscription else None
+                    end_date = subscription[1] if subscription else None
+                    print(f"✅ 구독 정보: {start_date} ~ {end_date}")
+                except Exception as e:
+                    print(f"⚠️ user_subscriptions 테이블 조회 실패 (무시): {e}")
+                    # 테이블이 없어도 계속 진행
                 
                 # 이번 달 사용량 조회 (request_logs 테이블 사용)
                 current_month = date.today().replace(day=1)
@@ -353,24 +359,28 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                     "end_date": end_date.isoformat() if end_date else None
                 }
                 
-                # 예정된 변경사항 확인
-                cursor.execute("""
-                    SELECT us.plan_id, p.name, us.start_date
-                    FROM user_subscriptions us
-                    JOIN plans p ON us.plan_id = p.id
-                    WHERE us.user_id = %s AND us.start_date > CURDATE()
-                    ORDER BY us.start_date ASC
-                    LIMIT 1
-                """, (user["id"],))
-                
-                pending_change = cursor.fetchone()
+                # 예정된 변경사항 확인 - user_subscriptions 테이블이 없을 수 있으므로 안전하게 처리
                 pending_changes = None
-                if pending_change:
-                    pending_changes = {
-                        "plan_id": pending_change[0],
-                        "plan_name": pending_change[1],
-                        "effective_date": pending_change[2].isoformat()
-                    }
+                try:
+                    cursor.execute("""
+                        SELECT us.plan_id, p.name, us.start_date
+                        FROM user_subscriptions us
+                        JOIN plans p ON us.plan_id = p.id
+                        WHERE us.user_id = %s AND us.start_date > CURDATE()
+                        ORDER BY us.start_date ASC
+                        LIMIT 1
+                    """, (user["id"],))
+                    
+                    pending_change = cursor.fetchone()
+                    if pending_change:
+                        pending_changes = {
+                            "plan_id": pending_change[0],
+                            "plan_name": pending_change[1],
+                            "effective_date": pending_change[2].isoformat()
+                        }
+                except Exception as e:
+                    print(f"⚠️ 예정된 변경사항 조회 실패 (무시): {e}")
+                    # 테이블이 없어도 계속 진행
                 
                 result = {
                     "plan": plan,
