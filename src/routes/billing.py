@@ -51,40 +51,37 @@ class PaymentResponse(BaseModel):
 async def test_database_connection():
     """데이터베이스 연결 테스트"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 1. 기본 연결 테스트
-        cursor.execute("SELECT 1 as test")
-        result = cursor.fetchone()
-        print(f"✅ 기본 연결 테스트: {result}")
-        
-        # 2. plans 테이블 존재 확인
-        cursor.execute("SHOW TABLES LIKE 'plans'")
-        plans_table = cursor.fetchone()
-        print(f"✅ plans 테이블 존재: {plans_table is not None}")
-        
-        # 3. plans 테이블 구조 확인
-        if plans_table:
-            cursor.execute("DESCRIBE plans")
-            columns = cursor.fetchall()
-            print(f"✅ plans 테이블 컬럼: {len(columns)}개")
-            for col in columns:
-                print(f"  - {col['Field']}: {col['Type']}")
-        
-        # 4. plans 테이블 데이터 확인
-        cursor.execute("SELECT COUNT(*) as count FROM plans")
-        count_result = cursor.fetchone()
-        print(f"✅ plans 테이블 데이터: {count_result['count']}개")
-        
-        cursor.close()
-        conn.close()
-        
-        return {
-            "success": True,
-            "message": "데이터베이스 연결 성공",
-            "plans_count": count_result['count'] if count_result else 0
-        }
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                
+                # 1. 기본 연결 테스트
+                cursor.execute("SELECT 1 as test")
+                result = cursor.fetchone()
+                print(f"✅ 기본 연결 테스트: {result}")
+                
+                # 2. plans 테이블 존재 확인
+                cursor.execute("SHOW TABLES LIKE 'plans'")
+                plans_table = cursor.fetchone()
+                print(f"✅ plans 테이블 존재: {plans_table is not None}")
+                
+                # 3. plans 테이블 구조 확인
+                if plans_table:
+                    cursor.execute("DESCRIBE plans")
+                    columns = cursor.fetchall()
+                    print(f"✅ plans 테이블 컬럼: {len(columns)}개")
+                    for col in columns:
+                        print(f"  - {col['Field']}: {col['Type']}")
+                
+                # 4. plans 테이블 데이터 확인
+                cursor.execute("SELECT COUNT(*) as count FROM plans")
+                count_result = cursor.fetchone()
+                print(f"✅ plans 테이블 데이터: {count_result['count']}개")
+                
+                return {
+                    "success": True,
+                    "message": "데이터베이스 연결 성공",
+                    "plans_count": count_result['count'] if count_result else 0
+                }
         
     except Exception as e:
         print(f"❌ 데이터베이스 테스트 오류: {e}")
@@ -99,63 +96,60 @@ async def test_database_connection():
 @router.get("/plans", response_model=List[PlanResponse])
 async def get_available_plans():
     """사용 가능한 요금제 목록 조회"""
-    conn = None
-    cursor = None
-    
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        print(f"🔍 plans 테이블 조회 시작...")
-        
-        cursor.execute("""
-            SELECT id, name, price, request_limit, description, features, 
-                   rate_limit_per_minute, is_popular, sort_order
-            FROM plans 
-            WHERE is_active = TRUE 
-            ORDER BY sort_order, price
-        """)
-        
-        print(f"✅ SQL 쿼리 실행 완료")
-        
-        plans = []
-        rows = cursor.fetchall()
-        print(f"📊 조회된 행 수: {len(rows)}")
-        
-        for row in rows:
-            try:
-                # features 컬럼은 JSON 또는 빈 문자열/NULL일 수 있으므로 안전하게 파싱
-                raw_features = row[5]
-                features_dict = {}
-                if raw_features is not None:
-                    try:
-                        text_features = raw_features.decode("utf-8") if isinstance(raw_features, (bytes, bytearray, memoryview)) else str(raw_features)
-                        text_features = text_features.strip()
-                        if text_features:
-                            features_dict = json.loads(text_features)
-                    except Exception as e:
-                        print(f"⚠️ features 파싱 오류 (row {row[0]}): {e}")
-                        features_dict = {}
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
                 
-                plan = {
-                    "id": row[0],
-                    "name": row[1],
-                    "price": float(row[2]),
-                    "request_limit": row[3],
-                    "description": row[4],
-                    "features": features_dict,
-                    "rate_limit_per_minute": row[6],
-                    "is_popular": bool(row[7]),
-                    "sort_order": row[8]
-                }
-                plans.append(plan)
-            except Exception as e:
-                print(f"❌ 행 처리 오류 (row {row}): {e}")
-                continue
-        
-        print(f"✅ 요금제 목록 반환: {len(plans)}개")
-        return plans
-        
+                print(f"🔍 plans 테이블 조회 시작...")
+                
+                cursor.execute("""
+                    SELECT id, name, price, request_limit, description, features, 
+                           rate_limit_per_minute, is_popular, sort_order
+                    FROM plans 
+                    WHERE is_active = TRUE 
+                    ORDER BY sort_order, price
+                """)
+                
+                print(f"✅ SQL 쿼리 실행 완료")
+                
+                plans = []
+                rows = cursor.fetchall()
+                print(f"📊 조회된 행 수: {len(rows)}")
+                
+                for row in rows:
+                    try:
+                        # features 컬럼은 JSON 또는 빈 문자열/NULL일 수 있으므로 안전하게 파싱
+                        raw_features = row[5]
+                        features_dict = {}
+                        if raw_features is not None:
+                            try:
+                                text_features = raw_features.decode("utf-8") if isinstance(raw_features, (bytes, bytearray, memoryview)) else str(raw_features)
+                                text_features = text_features.strip()
+                                if text_features:
+                                    features_dict = json.loads(text_features)
+                            except Exception as e:
+                                print(f"⚠️ features 파싱 오류 (row {row[0]}): {e}")
+                                features_dict = {}
+                        
+                        plan = {
+                            "id": row[0],
+                            "name": row[1],
+                            "price": float(row[2]),
+                            "request_limit": row[3],
+                            "description": row[4],
+                            "features": features_dict,
+                            "rate_limit_per_minute": row[6],
+                            "is_popular": bool(row[7]),
+                            "sort_order": row[8]
+                        }
+                        plans.append(plan)
+                    except Exception as e:
+                        print(f"❌ 행 처리 오류 (row {row}): {e}")
+                        continue
+                
+                print(f"✅ 요금제 목록 반환: {len(plans)}개")
+                return plans
+                
     except Exception as e:
         print(f"❌ get_available_plans 오류: {e}")
         print(f"❌ 오류 타입: {type(e)}")
@@ -165,11 +159,6 @@ async def get_available_plans():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"요금제 목록 조회 중 오류가 발생했습니다: {str(e)}"
         )
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
 
 @router.get("/current-plan", response_model=CurrentPlanResponse)
 async def get_current_plan(user=Depends(get_current_user_from_request)):
