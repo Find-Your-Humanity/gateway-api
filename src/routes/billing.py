@@ -114,7 +114,7 @@ async def get_available_plans():
                     SELECT id, name, price, request_limit, description, features, 
                            rate_limit_per_minute, is_popular, sort_order
                     FROM plans 
-                    WHERE is_active = TRUE 
+                    WHERE is_active = 1 
                     ORDER BY sort_order, price
                 """)
                 
@@ -359,7 +359,7 @@ async def change_plan(
     
     try:
         # 플랜 존재 확인
-        cursor.execute("SELECT id, name FROM plans WHERE id = %s AND is_active = TRUE", (request.plan_id,))
+        cursor.execute("SELECT id, name FROM plans WHERE id = %s AND is_active = 1", (request.plan_id,))
         plan = cursor.fetchone()
         
         if not plan:
@@ -429,7 +429,7 @@ async def purchase_plan(
     
     try:
         # 플랜 존재 확인
-        cursor.execute("SELECT id, name, price FROM plans WHERE id = %s AND is_active = TRUE", (request.plan_id,))
+        cursor.execute("SELECT id, name, price FROM plans WHERE id = %s AND is_active = 1", (request.plan_id,))
         plan = cursor.fetchone()
         
         if not plan:
