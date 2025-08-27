@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from ..models.api_key import APIKey
-from ..config.database import get_db
-from .auth import get_current_user_from_request as get_current_user
+from ..models.user import User
+from ..database import get_db
+from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/keys", tags=["API Keys"])
 
@@ -51,7 +52,7 @@ class APIKeyCreateResponse(BaseModel):
 @router.post("/", response_model=APIKeyCreateResponse)
 async def create_api_key(
     key_data: APIKeyCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """새로운 API 키 생성"""
@@ -89,7 +90,7 @@ async def create_api_key(
 
 @router.get("/", response_model=List[APIKeyResponse])
 async def list_api_keys(
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """사용자의 API 키 목록 조회"""
@@ -100,7 +101,7 @@ async def list_api_keys(
 @router.get("/{key_id}", response_model=APIKeyResponse)
 async def get_api_key(
     key_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """특정 API 키 조회"""
@@ -122,7 +123,7 @@ async def get_api_key(
 async def update_api_key(
     key_id: str,
     key_data: APIKeyUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """API 키 정보 수정"""
@@ -160,7 +161,7 @@ async def update_api_key(
 @router.delete("/{key_id}")
 async def delete_api_key(
     key_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """API 키 삭제"""
@@ -184,7 +185,7 @@ async def delete_api_key(
 @router.post("/{key_id}/regenerate")
 async def regenerate_api_key(
     key_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """API 키 재생성 (기존 키 무효화 후 새 키 발급)"""

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import json
 
 from ..models.api_key import APIKey
-from ..config.database import get_db
+from ..database import get_db
 
 security = HTTPBearer()
 

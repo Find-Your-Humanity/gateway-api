@@ -1,11 +1,12 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
 import uuid
 import hashlib
 import secrets
 
-from ..config.database import Base
+Base = declarative_base()
 
 class APIKey(Base):
     __tablename__ = "api_keys"
@@ -27,8 +28,8 @@ class APIKey(Base):
     rate_limit_per_minute = Column(Integer, default=100)  # 분당 요청 제한
     rate_limit_per_day = Column(Integer, default=10000)  # 일일 요청 제한
     
-    # 관계 설정 (User 모델이 별도로 정의되지 않았으므로 제거)
-    # user = relationship("User", back_populates="api_keys")
+    # 관계 설정
+    user = relationship("User", back_populates="api_keys")
     
     @classmethod
     def generate_key(cls, user_id: int, name: str, description: str = None, 

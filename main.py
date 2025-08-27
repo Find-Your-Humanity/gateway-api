@@ -2,17 +2,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-
 from src.routes.auth import router as auth_router
 from src.routes.dashboard import router as dashboard_router
 from src.routes.admin import router as admin_router
 from src.routes.billing import router as billing_router
-from src.routes.api_keys import router as api_keys_router
-from src.routes.payment_router import router as payment_router
-
 from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.usage_tracking import UsageTrackingMiddleware
-
 import asyncio
 from src.config.database import (
     init_database,
@@ -31,8 +26,6 @@ app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
-app.include_router(api_keys_router)
-app.include_router(payment_router)
 
 # 미들웨어 등록 (순서 중요: CORS -> 로깅)
 app.add_middleware(
@@ -56,7 +49,7 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(UsageTrackingMiddleware)
 
-# 422 검증 오류 전역 핸들러
+# 422 검증 오류를 사용자 친화적으로 반환하는 전역 핸들러
 def _translate_validation_error(err: dict) -> dict:
     loc_parts = [str(x) for x in err.get("loc", []) if x != "body"]
     field = ".".join(loc_parts) if loc_parts else ""
@@ -83,7 +76,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.get("/")
 def read_root():
-    return {"message": "Real Captcha Gateway API", "version": "1.0.0", "status": "running"}
+    return {
+        "message": "Real Captcha Gateway API", 
+        "version": "1.0.0",
+        "status": "running"
+    }
 
 @app.get("/health")
 def health_check():
@@ -93,13 +90,16 @@ def health_check():
 async def startup_event():
     """애플리케이션 시작 시 데이터베이스 연결 테스트"""
     print("🚀 Real Captcha Gateway API 시작 중...")
+    
+    # 데이터베이스 연결 테스트
     if test_connection():
         print("데이터베이스 연결 성공!")
+        # 데이터베이스 초기화 (테이블 생성)
         try:
             init_database()
         except Exception as e:
             print(f"데이터베이스 초기화 실패: {e}")
-
+        # 만료 토큰 정리 1회 수행 및 주기 실행
         try:
             deleted = cleanup_password_reset_tokens()
             if deleted:
@@ -119,6 +119,7 @@ async def startup_event():
                     deleted_codes = cleanup_password_reset_codes()
                     if deleted_codes:
                         print(f"(주기) 만료/사용 코드 정리: {deleted_codes}건 삭제")
+                    # 집계 작업 수행
                     a = aggregate_request_statistics(30)
                     e = aggregate_error_stats_daily(30)
                     p = aggregate_endpoint_usage_daily(30)
@@ -133,8 +134,9 @@ async def startup_event():
 
 @app.get("/api/status")
 def api_status():
+    """API 상태 확인"""
     return {
         "service": "gateway-api",
         "status": "running",
-        "database": "connected" if test_connection() else "disconnected",
-    }
+        "database": "connected" if test_connection() else "disconnected"
+    } 
