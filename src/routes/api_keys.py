@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from ..models.api_key import APIKey
-from ..database import get_db
+from ..config.database import get_db
 from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/keys", tags=["API Keys"])
