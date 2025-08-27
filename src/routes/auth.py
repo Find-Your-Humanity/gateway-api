@@ -561,10 +561,7 @@ def get_current_user(request: Request, response: Response):
 
         return {
             "success": True,
-            "data": {
-                "user": user,
-                "access_token": request.cookies.get("captcha_token") or request.headers.get("authorization", "").replace("Bearer ", "")
-            }
+            "user": user
         }
     except HTTPException:
         raise
@@ -691,8 +688,5 @@ async def google_callback(code: str, response: Response):
         
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Google OAuth 처리 실패: {e}")
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Google OAuth 처리 실패: {e}")
