@@ -36,7 +36,8 @@ app.add_middleware(
         "https://test.realcatcha.com",
         "https://dashboard.realcatcha.com",
         "http://localhost:3000",
-        "http://localhost:3001"
+        "http://localhost:3001",
+        "https://novelike-the-draw.static.hf.space"  # 임시 추가
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
