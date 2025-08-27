@@ -1,12 +1,11 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
 import uuid
 import hashlib
 import secrets
 
-Base = declarative_base()
+from ..config.database import Base
 
 class APIKey(Base):
     __tablename__ = "api_keys"
