@@ -6,6 +6,7 @@ from src.routes.auth import router as auth_router
 from src.routes.dashboard import router as dashboard_router
 from src.routes.admin import router as admin_router
 from src.routes.billing import router as billing_router
+from src.routes.api_keys import router as api_keys_router
 from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.usage_tracking import UsageTrackingMiddleware
 import asyncio
@@ -26,6 +27,7 @@ app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
+app.include_router(api_keys_router)
 
 # 미들웨어 등록 (순서 중요: CORS -> 로깅)
 app.add_middleware(

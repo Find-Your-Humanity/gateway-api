@@ -693,3 +693,6 @@ async def google_callback(code: str, response: Response):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Google OAuth 처리 실패: {e}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Google OAuth 처리 실패: {e}")
