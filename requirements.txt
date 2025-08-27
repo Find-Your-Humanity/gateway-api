@@ -8,6 +8,8 @@ python-multipart==0.0.6
 # MySQL 연동
 pymysql==1.1.0
 cryptography==41.0.7
+# ORM
+sqlalchemy==2.0.23
 # HTTP 클라이언트
 httpx==0.25.2
 PyJWT==2.8.0
