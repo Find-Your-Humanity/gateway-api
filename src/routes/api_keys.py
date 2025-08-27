@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from ..models.api_key import APIKey
-from ..models.user import User
 from ..database import get_db
 from ..auth import get_current_user
 
@@ -52,7 +51,7 @@ class APIKeyCreateResponse(BaseModel):
 @router.post("/", response_model=APIKeyCreateResponse)
 async def create_api_key(
     key_data: APIKeyCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """새로운 API 키 생성"""
@@ -90,7 +89,7 @@ async def create_api_key(
 
 @router.get("/", response_model=List[APIKeyResponse])
 async def list_api_keys(
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """사용자의 API 키 목록 조회"""
