@@ -1739,13 +1739,3 @@ def get_endpoint_usage(
     except Exception as e:
         logger.error(f"Error fetching endpoint usage: {e}")
         raise HTTPException(status_code=500, detail=f"엔드포인트 사용량 조회 실패: {str(e)}")
-
-                    })
-                
-                return {"endpoint_usage": endpoint_usage}
-                
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching endpoint usage: {e}")
-        raise HTTPException(status_code=500, detail=f"엔드포인트 사용량 조회 실패: {str(e)}")
