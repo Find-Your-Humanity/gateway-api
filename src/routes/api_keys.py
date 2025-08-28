@@ -127,19 +127,82 @@ async def create_api_key(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/keys/test-db")
+async def test_api_keys_database():
+    """API 키 데이터베이스 테스트"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 1. api_keys 테이블 존재 확인
+                cursor.execute("SHOW TABLES LIKE 'api_keys'")
+                table_exists = cursor.fetchone()
+                
+                if not table_exists:
+                    return {
+                        "success": False,
+                        "error": "api_keys 테이블이 존재하지 않습니다",
+                        "tables": []
+                    }
+                
+                # 2. api_keys 테이블 구조 확인
+                cursor.execute("DESCRIBE api_keys")
+                columns = cursor.fetchall()
+                
+                # 3. api_keys 테이블 데이터 확인
+                cursor.execute("SELECT COUNT(*) as count FROM api_keys")
+                count_result = cursor.fetchone()
+                
+                return {
+                    "success": True,
+                    "table_exists": True,
+                    "columns": columns,
+                    "total_records": count_result['count'] if count_result else 0
+                }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 @router.get("/keys/list")
 async def get_api_keys(current_user: Dict = Depends(get_current_user_from_request)):
     """사용자의 API 키 목록 조회"""
     try:
-        with get_db_connection() as db:
-            api_key_service = APIKeyService(db)
-            api_keys = api_key_service.get_user_api_keys(current_user['id'])
-            return {
-                "success": True,
-                "api_keys": api_keys
-            }
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 직접 쿼리로 테스트
+                query = """
+                SELECT id, key_id, name, description, is_active, created_at, updated_at, last_used_at, usage_count
+                FROM api_keys
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                """
+                cursor.execute(query, (current_user['id'],))
+                results = cursor.fetchall()
+                
+                api_keys = []
+                for row in results:
+                    api_keys.append({
+                        "id": row['id'],
+                        "key_id": row['key_id'],
+                        "name": row['name'],
+                        "description": row['description'],
+                        "is_active": bool(row['is_active']),
+                        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                        "updated_at": row['updated_at'].isoformat() if row['updated_at'] else None,
+                        "last_used_at": row['last_used_at'].isoformat() if row['last_used_at'] else None,
+                        "usage_count": row['usage_count'] or 0
+                    })
+                
+                return {
+                    "success": True,
+                    "api_keys": api_keys
+                }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        raise HTTPException(status_code=500, detail=f"API 키 목록 조회 실패: {str(e)}\n{traceback.format_exc()}")
 
 class ToggleApiKeyRequest(BaseModel):
     is_active: bool
