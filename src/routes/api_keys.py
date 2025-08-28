@@ -116,16 +116,35 @@ async def create_api_key(
 ):
     """새로운 API 키 생성"""
     try:
-        with get_db_connection() as db:
-            api_key_service = APIKeyService(db)
-            result = api_key_service.generate_api_key(
-                user_id=current_user['id'],
-                name=request_data.name,
-                description=request_data.description
-            )
-            return result
+        # 디버깅: 요청 데이터 확인
+        print(f"🔍 Debug - request_data: {request_data}")
+        print(f"🔍 Debug - current_user: {current_user}")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # API 키 생성
+                key_id = f"rc_live_{secrets.token_hex(16)}"
+                secret_key = f"rc_sk_{secrets.token_hex(32)}"
+                
+                # DB에 저장
+                query = """
+                INSERT INTO api_keys (key_id, secret_key, user_id, name, description, is_active, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """
+                cursor.execute(query, (key_id, secret_key, current_user['id'], request_data.name, request_data.description, True, datetime.now()))
+                conn.commit()
+                
+                return {
+                    "success": True,
+                    "api_key": key_id,
+                    "secret_key": secret_key,
+                    "created_at": datetime.now().isoformat()
+                }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_detail = f"API 키 생성 실패: {str(e)}\n{traceback.format_exc()}"
+        print(f"❌ Error: {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @router.get("/keys/test-auth")
 async def test_auth_middleware(current_user: Dict = Depends(get_current_user_from_request)):
@@ -241,16 +260,28 @@ async def toggle_api_key(
 ):
     """API 키 활성화/비활성화"""
     try:
-        with get_db_connection() as db:
-            api_key_service = APIKeyService(db)
-            result = api_key_service.toggle_api_key(
-                user_id=current_user['id'],
-                key_id=key_id,
-                is_active=request_data.is_active
-            )
-            return result
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                query = """
+                UPDATE api_keys 
+                SET is_active = %s
+                WHERE key_id = %s AND user_id = %s
+                """
+                cursor.execute(query, (request_data.is_active, key_id, current_user['id']))
+                conn.commit()
+                
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="API 키를 찾을 수 없습니다")
+                
+                return {
+                    "success": True,
+                    "message": f"API 키가 {'활성화' if request_data.is_active else '비활성화'}되었습니다"
+                }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_detail = f"API 키 상태 변경 실패: {str(e)}\n{traceback.format_exc()}"
+        print(f"❌ Error: {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @router.delete("/keys/{key_id}")
 async def delete_api_key(
@@ -259,12 +290,24 @@ async def delete_api_key(
 ):
     """API 키 삭제"""
     try:
-        with get_db_connection() as db:
-            api_key_service = APIKeyService(db)
-            result = api_key_service.delete_api_key(
-                user_id=current_user['id'],
-                key_id=key_id
-            )
-            return result
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                query = """
+                DELETE FROM api_keys 
+                WHERE key_id = %s AND user_id = %s
+                """
+                cursor.execute(query, (key_id, current_user['id']))
+                conn.commit()
+                
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="API 키를 찾을 수 없습니다")
+                
+                return {
+                    "success": True,
+                    "message": "API 키가 삭제되었습니다"
+                }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_detail = f"API 키 삭제 실패: {str(e)}\n{traceback.format_exc()}"
+        print(f"❌ Error: {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
