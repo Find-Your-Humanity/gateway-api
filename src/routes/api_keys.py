@@ -4,7 +4,7 @@ import secrets
 import hashlib
 from datetime import datetime, timedelta
 from src.config.database import get_db_connection
-from src.middleware.auth import get_current_user
+from src.routes.auth import get_current_user_from_request
 
 router = APIRouter(prefix="/api", tags=["API Keys"])
 
@@ -112,7 +112,7 @@ class CreateApiKeyRequest(BaseModel):
 @router.post("/keys/create")
 async def create_api_key(
     request_data: CreateApiKeyRequest,
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(get_current_user_from_request)
 ):
     """새로운 API 키 생성"""
     try:
@@ -128,7 +128,7 @@ async def create_api_key(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/keys/list")
-async def get_api_keys(current_user: Dict = Depends(get_current_user)):
+async def get_api_keys(current_user: Dict = Depends(get_current_user_from_request)):
     """사용자의 API 키 목록 조회"""
     try:
         with get_db_connection() as db:
@@ -148,7 +148,7 @@ class ToggleApiKeyRequest(BaseModel):
 async def toggle_api_key(
     key_id: str,
     request_data: ToggleApiKeyRequest,
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(get_current_user_from_request)
 ):
     """API 키 활성화/비활성화"""
     try:
@@ -166,7 +166,7 @@ async def toggle_api_key(
 @router.delete("/keys/{key_id}")
 async def delete_api_key(
     key_id: str,
-    current_user: Dict = Depends(get_current_user)
+    current_user: Dict = Depends(get_current_user_from_request)
 ):
     """API 키 삭제"""
     try:
