@@ -87,6 +87,10 @@ def create_or_update_user_from_google(google_user: Dict[str, Any]) -> Dict[str, 
                     columns = [col[0] for col in cursor.fetchall()]
                     user_data = dict(zip(columns, user_data))
                 
+                # 일관성을 위해 name을 full_name으로 반환
+                if isinstance(user_data, dict):
+                    user_data['full_name'] = user_data.get('name')
+                
                 return user_data
             else:
                 # 새 사용자 생성
@@ -121,5 +125,9 @@ def create_or_update_user_from_google(google_user: Dict[str, Any]) -> Dict[str, 
                     cursor.execute("DESCRIBE users")
                     columns = [col[0] for col in cursor.fetchall()]
                     user_data = dict(zip(columns, user_data))
+                
+                # 일관성을 위해 name을 full_name으로 반환
+                if isinstance(user_data, dict):
+                    user_data['full_name'] = user_data.get('name')
                 
                 return user_data

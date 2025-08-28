@@ -131,7 +131,7 @@ def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
                         'id': user['id'],
                         'email': user['email'],
                         'username': user['username'],
-                        'full_name': user.get('full_name') if isinstance(user, dict) else None,
+                        'full_name': user['username'],  # ← 일반 로그인은 username 사용
                         'is_admin': user['is_admin']
                     }
                 return None
@@ -145,10 +145,16 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT id, email, username, name as full_name, is_admin FROM users WHERE id = %s AND is_active = TRUE",
+                    "SELECT id, email, username, name, oauth_provider, is_admin FROM users WHERE id = %s AND is_active = TRUE",
                     (user_id,)
                 )
                 user = cursor.fetchone()
+                if user:
+                    # OAuth 사용자는 name, 일반 사용자는 username 사용
+                    if user.get('oauth_provider') == 'google':
+                        user['full_name'] = user.get('name')
+                    else:
+                        user['full_name'] = user.get('username')
                 return user
     except Exception as e:
         print(f"사용자 조회 오류: {e}")
@@ -193,7 +199,7 @@ def create_user(email: str, username: str, password: str, full_name: str = None,
                     'id': user_id,
                     'email': email,
                     'username': username,
-                    'full_name': full_name,
+                    'full_name': username,  # ← 일반 회원가입은 username 사용
                     'contact': contact,
                     'is_admin': False,
                     'is_verified': False
