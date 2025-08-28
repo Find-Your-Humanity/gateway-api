@@ -39,6 +39,10 @@ app.add_middleware(
         "https://dashboard.realcatcha.com",
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost",
+        "http://localhost:8080",
+        "http://127.0.0.1",
+        "http://127.0.0.1:8080",
         "https://novelike-the-draw.static.hf.space"  # 임시 추가
     ],
     allow_credentials=True,
