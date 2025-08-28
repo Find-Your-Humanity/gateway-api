@@ -127,6 +127,23 @@ async def create_api_key(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/keys/test-auth")
+async def test_auth_middleware(current_user: Dict = Depends(get_current_user_from_request)):
+    """인증 미들웨어 테스트"""
+    try:
+        return {
+            "success": True,
+            "message": "인증 성공",
+            "user": current_user
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 @router.get("/keys/test-db")
 async def test_api_keys_database():
     """API 키 데이터베이스 테스트"""
@@ -170,6 +187,9 @@ async def test_api_keys_database():
 async def get_api_keys(current_user: Dict = Depends(get_current_user_from_request)):
     """사용자의 API 키 목록 조회"""
     try:
+        # 디버깅: current_user 정보 확인
+        print(f"🔍 Debug - current_user: {current_user}")
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 # 직접 쿼리로 테스트
@@ -198,11 +218,17 @@ async def get_api_keys(current_user: Dict = Depends(get_current_user_from_reques
                 
                 return {
                     "success": True,
-                    "api_keys": api_keys
+                    "api_keys": api_keys,
+                    "debug": {
+                        "user_id": current_user['id'],
+                        "total_found": len(api_keys)
+                    }
                 }
     except Exception as e:
         import traceback
-        raise HTTPException(status_code=500, detail=f"API 키 목록 조회 실패: {str(e)}\n{traceback.format_exc()}")
+        error_detail = f"API 키 목록 조회 실패: {str(e)}\n{traceback.format_exc()}"
+        print(f"❌ Error: {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
 class ToggleApiKeyRequest(BaseModel):
     is_active: bool
