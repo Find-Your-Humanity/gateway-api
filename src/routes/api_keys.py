@@ -109,7 +109,7 @@ class CreateApiKeyRequest(BaseModel):
     name: str
     description: Optional[str] = None
 
-@router.post("/v1/keys/create")
+@router.post("/keys/create")
 async def create_api_key(
     request_data: CreateApiKeyRequest,
     current_user: Dict = Depends(get_current_user)
@@ -127,7 +127,7 @@ async def create_api_key(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/v1/keys/list")
+@router.get("/keys/list")
 async def get_api_keys(current_user: Dict = Depends(get_current_user)):
     """사용자의 API 키 목록 조회"""
     try:
@@ -144,7 +144,7 @@ async def get_api_keys(current_user: Dict = Depends(get_current_user)):
 class ToggleApiKeyRequest(BaseModel):
     is_active: bool
 
-@router.patch("/v1/keys/{key_id}/toggle")
+@router.patch("/keys/{key_id}/toggle")
 async def toggle_api_key(
     key_id: str,
     request_data: ToggleApiKeyRequest,
@@ -163,7 +163,7 @@ async def toggle_api_key(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/v1/keys/{key_id}")
+@router.delete("/keys/{key_id}")
 async def delete_api_key(
     key_id: str,
     current_user: Dict = Depends(get_current_user)
