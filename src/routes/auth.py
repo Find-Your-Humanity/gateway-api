@@ -659,7 +659,7 @@ async def google_callback(code: str, response: Response):
             domain=".realcatcha.com",
             httponly=True,
             secure=True,
-            samesite="none",
+            samesite="none", 
             max_age=60 * 30  # 30분
         )
         
@@ -669,7 +669,7 @@ async def google_callback(code: str, response: Response):
             domain=".realcatcha.com",
             httponly=True,
             secure=True,
-            samesite="none",
+            samesite="none",  
             max_age=60 * 60 * 24 * 14  # 14일
         )
         
