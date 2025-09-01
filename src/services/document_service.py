@@ -9,6 +9,7 @@ class DocumentService:
         self.documents_dir = Path(__file__).parent.parent.parent / "documents"
         self.supported_languages = ["ko", "en"]
         self.supported_document_types = [
+            "developer_guide",
             "api_key_usage_guide", 
             "설정", 
             "invisible_captcha", 
@@ -24,6 +25,7 @@ class DocumentService:
         
         # 사이드바 아이템과 실제 파일명 매핑
         self.sidebar_to_filename_mapping = {
+            "developer_guide": "developer_guide",
             "api_key_usage_guide": "api_key_usage_guide",
             "설정": "설정",
             "invisible_captcha": "invisible_captcha",
@@ -67,7 +69,14 @@ class DocumentService:
         """문서 파일 경로 반환"""
         # 사이드바 아이템을 실제 파일명으로 변환
         filename = self._normalize_document_type(document_type)
-        return self.documents_dir / language / f"{filename}.md"
+        print(f"🔍 파일명 정규화: {document_type} -> {filename}")
+        
+        doc_path = self.documents_dir / language / f"{filename}.md"
+        print(f"🔍 최종 파일 경로: {doc_path}")
+        print(f"🔍 문서 디렉토리: {self.documents_dir}")
+        print(f"🔍 언어 디렉토리: {self.documents_dir / language}")
+        
+        return doc_path
     
     def _get_default_content(self, language: str, document_type: str) -> str:
         """기본 콘텐츠 반환"""
@@ -75,15 +84,21 @@ class DocumentService:
     
     async def get_document(self, language: str, document_type: str) -> Dict[str, Any]:
         """문서 내용 조회"""
+        print(f"🔍 문서 서비스 호출: language={language}, document_type={document_type}")
+        print(f"🔍 지원 언어: {self.supported_languages}")
+        print(f"🔍 지원 문서 타입: {self.supported_document_types}")
+        
         try:
             # 지원 언어 및 문서 타입 확인
             if language not in self.supported_languages:
+                print(f"🔍 지원하지 않는 언어: {language}")
                 return {
                     "success": False,
                     "data": {"error": f"Unsupported language: {language}"}
                 }
             
             if document_type not in self.supported_document_types:
+                print(f"🔍 지원하지 않는 문서 타입: {document_type}")
                 return {
                     "success": False,
                     "data": {"error": f"Unsupported document type: {document_type}"}
@@ -91,29 +106,46 @@ class DocumentService:
             
             # 문서 파일 경로
             doc_path = self._get_document_path(language, document_type)
+            print(f"🔍 파일 경로: {doc_path}")
+            print(f"🔍 파일 존재: {doc_path.exists()}")
             
             # 파일이 존재하면 읽기, 없으면 기본 콘텐츠 반환
             if doc_path.exists():
+                print(f"🔍 파일 읽기 시작: {doc_path}")
                 content = doc_path.read_text(encoding='utf-8')
-            else:
-                content = self._get_default_content(language, document_type)
-            
-            return {
-                "success": True,
-                "data": {
-                    "language": language,
-                    "document_type": document_type,
-                    "content": content,
-                    "exists": doc_path.exists(),
-                    "file_path": str(doc_path),
-                    "normalized_type": self._normalize_document_type(document_type)
+                print(f"🔍 파일 읽기 성공, 내용 길이: {len(content)}")
+                result = {
+                    "success": True,
+                    "data": {
+                        "content": content,
+                        "exists": True,
+                        "file_path": str(doc_path),
+                        "normalized_type": document_type
+                    }
                 }
-            }
+            else:
+                print(f"🔍 파일이 존재하지 않음, 기본 콘텐츠 반환")
+                content = self._get_default_content(language, document_type)
+                result = {
+                    "success": True,
+                    "data": {
+                        "content": content,
+                        "exists": False,
+                        "file_path": str(doc_path),
+                        "normalized_type": document_type
+                    }
+                }
+            
+            print(f"🔍 문서 서비스 응답: {result}")
+            return result
             
         except Exception as e:
+            print(f"🔍 문서 서비스 오류 발생: {str(e)}")
+            import traceback
+            print(f"🔍 오류 상세: {traceback.format_exc()}")
             return {
                 "success": False,
-                "data": {"error": str(e)}
+                "data": {"error": f"문서 조회 중 오류 발생: {str(e)}"}
             }
     
     async def update_document(self, language: str, document_type: str, content: str) -> Dict[str, Any]:

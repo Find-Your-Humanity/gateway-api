@@ -28,12 +28,16 @@ async def get_document(
     document_type: str
 ):
     """문서 내용 조회 (공개 엔드포인트)"""
+    print(f"🔍 API 요청 수신: language={language}, document_type={document_type}")
     try:
         result = await document_service.get_document(language, document_type)
+        print(f"🔍 API 응답 성공: {result}")
         return result
     except HTTPException:
+        print(f"🔍 API HTTP 오류 발생: {HTTPException}")
         raise
     except Exception as e:
+        print(f"🔍 API 일반 오류 발생: {str(e)}")
         raise HTTPException(status_code=500, detail=f"문서 조회 중 오류 발생: {str(e)}")
 
 @router.post("/documents/update", response_model=DocumentResponse)
