@@ -1,7 +1,7 @@
 import httpx
 import json
 from typing import Optional, Dict, Any
-from src.config.oauth import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_TOKEN_URL, GOOGLE_USERINFO_URL
+from src.config.oauth import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_TOKEN_URL, GOOGLE_USERINFO_URL, GOOGLE_REDIRECT_URI
 
 async def exchange_code_for_token(code: str) -> Optional[Dict[str, Any]]:
     """인증 코드를 액세스 토큰으로 교환"""
@@ -14,7 +14,7 @@ async def exchange_code_for_token(code: str) -> Optional[Dict[str, Any]]:
                     'client_secret': GOOGLE_CLIENT_SECRET,
                     'code': code,
                     'grant_type': 'authorization_code',
-                    'redirect_uri': 'https://www.realcatcha.com/auth/google/callback'
+                    'redirect_uri': GOOGLE_REDIRECT_URI
                 }
             )
             

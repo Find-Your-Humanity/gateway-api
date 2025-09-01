@@ -46,7 +46,7 @@ def refresh_token(request: Request, response: Response):
         response.set_cookie(
             key="captcha_token",
             value=access,
-            domain="www.realcatcha.com",
+            domain=".realcatcha.com",
             httponly=True,
             secure=True,
             samesite="none",
@@ -59,7 +59,7 @@ def refresh_token(request: Request, response: Response):
             response.set_cookie(
                 key="captcha_refresh",
                 value=new_raw,
-                domain="www.realcatcha.com",
+                domain=".realcatcha.com",
                 httponly=True,
                 secure=True,
                 samesite="none",
@@ -295,7 +295,7 @@ def login(req: LoginRequest, response: Response):
         response.set_cookie(
             key="captcha_token",
             value=access_token,
-            domain="www.realcatcha.com",  # 모든 서브도메인에서 접근 가능
+            domain=".realcatcha.com",  # 모든 서브도메인에서 접근 가능
             httponly=True,  # XSS 방지
             secure=True,    # HTTPS에서만 전송
             samesite="none", # CSRF 방지하면서 일반적인 사이트 간 이동 허용
@@ -306,7 +306,7 @@ def login(req: LoginRequest, response: Response):
         response.set_cookie(
             key="captcha_refresh",
             value=refresh_raw,
-            domain="www.realcatcha.com",
+            domain=".realcatcha.com",
             httponly=True,
             secure=True,
             samesite="none",
@@ -477,7 +477,7 @@ def logout(response: Response):
         response.set_cookie(
             key="captcha_token",
             value="",
-            domain="www.realcatcha.com",
+            domain=".realcatcha.com",
             httponly=True,
             secure=True,
             samesite="none",
@@ -486,7 +486,7 @@ def logout(response: Response):
         response.set_cookie(
             key="captcha_refresh",
             value="",
-            domain="www.realcatcha.com",
+            domain=".realcatcha.com",
             httponly=True,
             secure=True,
             samesite="none",
@@ -549,7 +549,7 @@ def get_current_user(request: Request, response: Response):
                 response.set_cookie(
                     key="captcha_refresh",
                     value=_raw,
-                    domain="www.realcatcha.com",
+                    domain=".realcatcha.com",
                     httponly=True,
                     secure=True,
                     samesite="none",
@@ -656,7 +656,7 @@ async def google_callback(code: str, response: Response):
         response.set_cookie(
             key="captcha_token",
             value=access_token_jwt,
-            domain="www.realcatcha.com",
+            domain=".realcatcha.com",
             httponly=True,
             secure=True,
             samesite="none",
@@ -666,7 +666,7 @@ async def google_callback(code: str, response: Response):
         response.set_cookie(
             key="captcha_refresh",
             value=refresh_raw,
-            domain="www.realcatcha.com",
+            domain=".realcatcha.com",
             httponly=True,
             secure=True,
             samesite="none",

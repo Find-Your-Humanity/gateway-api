@@ -3,7 +3,7 @@ import os
 # Google OAuth 설정
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
-GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'https://www.realcatcha.com/auth/google/callback')
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'https://realcatcha.com/auth/google/callback')
 
 # Google OAuth URL
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -20,6 +20,12 @@ GOOGLE_SCOPES = [
 def get_google_auth_url():
     """Google OAuth 로그인 URL 생성"""
     import urllib.parse
+    
+    # 환경 변수 확인
+    if not GOOGLE_CLIENT_ID:
+        raise ValueError("GOOGLE_CLIENT_ID 환경 변수가 설정되지 않았습니다.")
+    if not GOOGLE_CLIENT_SECRET:
+        raise ValueError("GOOGLE_CLIENT_SECRET 환경 변수가 설정되지 않았습니다.")
     
     params = {
         'response_type': 'code',
