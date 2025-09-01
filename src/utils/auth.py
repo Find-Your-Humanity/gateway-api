@@ -211,8 +211,8 @@ def create_user(email: str, username: str, password: str, full_name: str = None,
 def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     """현재 인증된 사용자 정보 반환"""
     try:
-        # 쿠키에서 토큰 가져오기
-        token = request.cookies.get("access_token")
+        # 쿠키에서 토큰 가져오기 (Google OAuth에서 설정한 쿠키 이름 사용)
+        token = request.cookies.get("captcha_token")
         if not token:
             return None
         
