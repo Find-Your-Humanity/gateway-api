@@ -15,7 +15,6 @@ class DocumentService:
             "invisible_captcha", 
             "custom_theme", 
             "language_codes", 
-            "faq", 
             "enterprise_account_management", 
             "recaptcha_migration", 
             "mobile_sdk", 
@@ -23,6 +22,22 @@ class DocumentService:
             "pro_features", 
             "enterprise_overview"
         ]
+        
+        # 사이드바 아이템과 실제 파일명 매핑
+        self.sidebar_to_filename_mapping = {
+            "developer_guide": "developer_guide",
+            "api_key_usage_guide": "api_key_usage_guide",
+            "설정": "설정",
+            "invisible_captcha": "invisible_captcha",
+            "custom_theme": "custom_theme",
+            "language_codes": "language_codes",
+            "enterprise_account_management": "enterprise_account_management",
+            "recaptcha_migration": "recaptcha_migration",
+            "mobile_sdk": "mobile_sdk",
+            "통합": "통합",
+            "pro_features": "pro_features",
+            "enterprise_overview": "enterprise_overview"
+        }
         
         # 문서 저장소 초기화
         self._init_document_storage()
@@ -33,9 +48,28 @@ class DocumentService:
             lang_dir = self.documents_dir / lang
             lang_dir.mkdir(parents=True, exist_ok=True)
     
+    def _normalize_document_type(self, document_type: str) -> str:
+        """사이드바 아이템을 실제 파일명으로 변환"""
+        # 직접 매핑 확인
+        if document_type in self.sidebar_to_filename_mapping:
+            return self.sidebar_to_filename_mapping[document_type]
+        
+        # 파일명 정규화 (언더스코어를 하이픈으로 변환 등)
+        normalized = document_type.replace('_', '-').lower()
+        
+        # 정규화된 이름으로 매핑 확인
+        for key, value in self.sidebar_to_filename_mapping.items():
+            if key.replace('_', '-').lower() == normalized:
+                return value
+        
+        # 매핑되지 않은 경우 원본 반환
+        return document_type
+    
     def _get_document_path(self, language: str, document_type: str) -> Path:
         """문서 파일 경로 반환"""
-        return self.documents_dir / language / f"{document_type}.md"
+        # 사이드바 아이템을 실제 파일명으로 변환
+        filename = self._normalize_document_type(document_type)
+        return self.documents_dir / language / f"{filename}.md"
     
     def _get_default_content(self, language: str, document_type: str) -> str:
         """기본 콘텐츠 반환"""
@@ -128,7 +162,9 @@ For more detailed information, please refer to the API documentation."""
                     "language": language,
                     "document_type": document_type,
                     "content": content,
-                    "exists": doc_path.exists()
+                    "exists": doc_path.exists(),
+                    "file_path": str(doc_path),
+                    "normalized_type": self._normalize_document_type(document_type)
                 }
             }
             
@@ -168,7 +204,8 @@ For more detailed information, please refer to the API documentation."""
                 "data": {
                     "language": language,
                     "document_type": document_type,
-                    "message": "Document updated successfully"
+                    "message": "Document updated successfully",
+                    "file_path": str(doc_path)
                 }
             }
             
@@ -200,7 +237,8 @@ For more detailed information, please refer to the API documentation."""
                         "language": lang,
                         "document_type": doc_type,
                         "exists": doc_path.exists(),
-                        "path": str(doc_path)
+                        "path": str(doc_path),
+                        "normalized_type": self._normalize_document_type(doc_type)
                     })
             
             return {
@@ -208,7 +246,8 @@ For more detailed information, please refer to the API documentation."""
                 "data": {
                     "documents": documents,
                     "supported_languages": self.supported_languages,
-                    "supported_document_types": self.supported_document_types
+                    "supported_document_types": self.supported_document_types,
+                    "sidebar_mapping": self.sidebar_to_filename_mapping
                 }
             }
             
