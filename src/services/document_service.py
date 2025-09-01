@@ -9,7 +9,6 @@ class DocumentService:
         self.documents_dir = Path(__file__).parent.parent.parent / "documents"
         self.supported_languages = ["ko", "en"]
         self.supported_document_types = [
-            "developer_guide", 
             "api_key_usage_guide", 
             "설정", 
             "invisible_captcha", 
@@ -25,7 +24,6 @@ class DocumentService:
         
         # 사이드바 아이템과 실제 파일명 매핑
         self.sidebar_to_filename_mapping = {
-            "developer_guide": "developer_guide",
             "api_key_usage_guide": "api_key_usage_guide",
             "설정": "설정",
             "invisible_captcha": "invisible_captcha",
@@ -73,62 +71,6 @@ class DocumentService:
     
     def _get_default_content(self, language: str, document_type: str) -> str:
         """기본 콘텐츠 반환"""
-        if document_type == "developer_guide":
-            if language == "ko":
-                return """# RealCatcha 개발자 가이드
-
-## 소개
-RealCatcha는 기존 reCAPTCHA에서 전환하기 쉬운 차세대 캡차 솔루션입니다.
-
-## 기본 원칙
-1. 사용자 경험 우선
-2. 보안성 보장
-3. 쉬운 통합
-
-## 설치 방법
-```bash
-npm install realcatcha
-```
-
-## 사용 방법
-```javascript
-import { RealCatcha } from 'realcatcha';
-
-const captcha = new RealCatcha({
-  siteKey: 'your-site-key'
-});
-```
-
-## 다음 단계
-더 자세한 정보는 API 문서를 참조하세요."""
-            else:
-                return """# RealCatcha Developer Guide
-
-## Introduction
-RealCatcha is a next-generation captcha solution that makes it easy to transition from reCAPTCHA.
-
-## Basic Principles
-1. User Experience First
-2. Security Guaranteed
-3. Easy Integration
-
-## Installation
-```bash
-npm install realcatcha
-```
-
-## Usage
-```javascript
-import { RealCatcha } from 'realcatcha';
-
-const captcha = new RealCatcha({
-  siteKey: 'your-site-key'
-});
-```
-
-## Next Steps
-For more detailed information, please refer to the API documentation."""
-        
         return f"# {document_type.replace('_', ' ').title()}\n\nThis is the default content for {document_type} in {language}."
     
     async def get_document(self, language: str, document_type: str) -> Dict[str, Any]:
