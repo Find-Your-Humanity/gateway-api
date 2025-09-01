@@ -42,6 +42,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # 애플리케이션 소스 복사
 COPY main.py .
 COPY src/ ./src/
+COPY documents/ ./documents/
 
 # 포트 노출
 EXPOSE 80
