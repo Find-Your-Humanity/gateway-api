@@ -1,10 +1,10 @@
-# from fastapi import APIRouter, HTTPException, Depends, Request
-# from pydantic import BaseModel
-# from typing import Optional
-# from src.services.document_service import document_service
-# from src.utils.auth import get_current_user, verify_admin_permission
+from fastapi import APIRouter, HTTPException, Depends, Request
+from pydantic import BaseModel
+from typing import Optional
+from src.services.document_service import document_service
+from src.utils.auth import get_current_user, verify_admin_permission
 
-# router = APIRouter(prefix="/api/admin", tags=["admin_documents"])
+router = APIRouter(prefix="/api/admin", tags=["admin_documents"])
 
 # 요청/응답 모델
 class DocumentUpdateRequest(BaseModel):
