@@ -322,44 +322,32 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                     # 기본 free 플랜 제한
                     limits = {"perMinute": 60, "perDay": 1000, "perMonth": 30000}
                 
-                # 현재 사용량 조회 (request_logs.request_time 사용)
+                # 현재 사용량 조회 (user_usage_tracking 테이블에서 캡차 사용량만)
                 now = datetime.now()
                 
-                # 분당 사용량 (현재 분)
+                # user_usage_tracking 테이블에서 오늘 사용량 조회
                 cursor.execute(
                     """
-                    SELECT COUNT(*) as count
-                    FROM request_logs 
-                    WHERE user_id = %s 
-                    AND request_time >= DATE_FORMAT(NOW(), '%%Y-%%m-%%d %%H:%%i:00')
+                    SELECT 
+                        per_minute_count,
+                        per_day_count,
+                        per_month_count
+                    FROM user_usage_tracking 
+                    WHERE user_id = %s AND tracking_date = CURDATE()
                     """,
                     (current_user["id"],)
                 )
-                per_minute_usage = cursor.fetchone().get("count", 0) if cursor.fetchone() else 0
                 
-                # 일일 사용량 (오늘)
-                cursor.execute(
-                    """
-                    SELECT COUNT(*) as count
-                    FROM request_logs 
-                    WHERE user_id = %s 
-                    AND DATE(request_time) = CURDATE()
-                    """,
-                    (current_user["id"],)
-                )
-                per_day_usage = cursor.fetchone().get("count", 0) if cursor.fetchone() else 0
-                
-                # 월간 사용량 (이번 달)
-                cursor.execute(
-                    """
-                    SELECT COUNT(*) as count
-                    FROM request_logs 
-                    WHERE user_id = %s 
-                    AND DATE_FORMAT(request_time, '%%Y-%%m') = DATE_FORMAT(NOW(), '%%Y-%%m')
-                    """,
-                    (current_user["id"],)
-                )
-                per_month_usage = cursor.fetchone().get("count", 0) if cursor.fetchone() else 0
+                usage_data = cursor.fetchone()
+                if usage_data:
+                    per_minute_usage = usage_data.get("per_minute_count", 0)
+                    per_day_usage = usage_data.get("per_day_count", 0)
+                    per_month_usage = usage_data.get("per_month_count", 0)
+                else:
+                    # 오늘 사용량 기록이 없으면 0
+                    per_minute_usage = 0
+                    per_day_usage = 0
+                    per_month_usage = 0
                 
                 # user_subscriptions 테이블에서 현재 구독 정보 확인
                 cursor.execute(

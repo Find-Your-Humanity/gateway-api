@@ -11,6 +11,7 @@ from src.routes.captcha import router as captcha_router
 from src.routes.admin_documents import router as admin_documents_router
 from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.usage_tracking import UsageTrackingMiddleware
+from src.services.usage_service import usage_service
 import asyncio
 from src.config.database import (
     init_database,
@@ -135,9 +136,15 @@ async def startup_event():
                     e = aggregate_error_stats_daily(30)
                     p = aggregate_endpoint_usage_daily(30)
                     print(f"📈 집계 업데이트: stats={a}, error={e}, endpoint={p}")
+                    
+                    # 사용량 리셋 작업 수행 (매분, 매일, 매월)
+                    reset_result = await usage_service.reset_periodic_usage()
+                    if reset_result:
+                        print(f"🔄 사용량 리셋 완료")
+                    
                 except Exception as e:
                     print(f"⚠️(주기) 토큰/코드 정리 실패: {e}")
-                await asyncio.sleep(60 * 60 * 6)  # 6시간 간격
+                await asyncio.sleep(60)  # 1분 간격으로 변경 (분당 리셋을 위해)
 
         asyncio.create_task(periodic_cleanup())
     else:

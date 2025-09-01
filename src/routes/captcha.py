@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
+from src.services.usage_service import usage_service
 
 router = APIRouter(prefix="/api", tags=["captcha"])
 
@@ -134,7 +135,7 @@ def check_rate_limit(api_key_info: Dict[str, Any]) -> bool:
         print(f"사용량 제한 확인 오류: {e}")
         return False
 
-def log_api_usage(api_key_info: Dict[str, Any], request_data: Dict[str, Any]):
+async def log_api_usage(api_key_info: Dict[str, Any], request_data: Dict[str, Any]):
     """
     API 사용량을 로그에 기록합니다.
     """
@@ -163,6 +164,10 @@ def log_api_usage(api_key_info: Dict[str, Any], request_data: Dict[str, Any]):
                 ))
                 
                 conn.commit()
+                
+                # 캡차 사용량 증가 (user_usage_tracking 테이블)
+                await usage_service.increment_captcha_usage(api_key_info['user_id'])
+                
     except Exception as e:
         print(f"API 사용량 로그 기록 오류: {e}")
 
@@ -216,7 +221,7 @@ async def next_captcha(request: Request):
             next_captcha_type = random.choice(captcha_types)
         
         # API 사용량 로그 기록
-        log_api_usage(api_key_info, request_data)
+        await log_api_usage(api_key_info, request_data)
         
         # 응답 데이터
         response_data = {
@@ -271,7 +276,7 @@ async def verify_handwriting(request: Request):
         is_valid = len(image_base64) > 100  # 간단한 검증 (실제로는 ML 모델 사용)
         
         # API 사용량 로그 기록
-        log_api_usage(api_key_info, {"action": "handwriting_verification"})
+        await log_api_usage(api_key_info, {"action": "handwriting_verification"})
         
         # 응답 데이터
         response_data = {
