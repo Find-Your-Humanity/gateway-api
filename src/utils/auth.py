@@ -6,6 +6,7 @@ import hashlib
 from passlib.context import CryptContext
 from typing import Optional, Dict, Any, Tuple
 from src.config.database import get_db_connection
+from fastapi import Request
 
 # 비밀번호 해싱 설정
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -204,4 +205,37 @@ def create_user(email: str, username: str, password: str, full_name: str = None,
                 }, None
     except Exception as e:
         print(f"사용자 생성 오류: {e}")
-        return None, 'error' 
+        return None, 'error'
+
+# FastAPI 의존성 함수들
+def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
+    """현재 인증된 사용자 정보 반환"""
+    try:
+        # 쿠키에서 토큰 가져오기
+        token = request.cookies.get("access_token")
+        if not token:
+            return None
+        
+        # 토큰 검증
+        payload = verify_token(token)
+        if not payload:
+            return None
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        
+        # 사용자 정보 조회
+        user = get_user_by_id(user_id)
+        return user
+    except Exception as e:
+        print(f"현재 사용자 조회 오류: {e}")
+        return None
+
+def verify_admin_permission(user: Dict[str, Any]) -> bool:
+    """사용자가 관리자 권한을 가지고 있는지 확인"""
+    if not user:
+        return False
+    
+    # is_admin이 True이거나 1인 경우 관리자로 간주
+    return user.get('is_admin') == True or user.get('is_admin') == 1 
