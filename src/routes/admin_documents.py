@@ -25,10 +25,9 @@ async def require_admin(user = Depends(get_current_user)):
 @router.get("/documents/{language}/{document_type}", response_model=DocumentResponse)
 async def get_document(
     language: str,
-    document_type: str,
-    current_user = Depends(require_admin)
+    document_type: str
 ):
-    """문서 내용 조회 (관리자 전용)"""
+    """문서 내용 조회 (공개 엔드포인트)"""
     try:
         result = await document_service.get_document(language, document_type)
         return result
@@ -57,10 +56,9 @@ async def update_document(
 
 @router.get("/documents", response_model=DocumentResponse)
 async def list_documents(
-    language: Optional[str] = None,
-    current_user = Depends(require_admin)
+    language: Optional[str] = None
 ):
-    """문서 목록 조회 (관리자 전용)"""
+    """문서 목록 조회 (공개 엔드포인트)"""
     try:
         result = await document_service.list_documents(language)
         return result
