@@ -955,7 +955,7 @@ def submit_contact_request(
                     "success": True, 
                     "message": "문의가 성공적으로 접수되었습니다.",
                     "contact_id": contact_id,
-                    "status_check_url": f"https://realcatcha.com/contact-status?email={user_email}&id={contact_id}"
+                    "status_check_url": f"https://www.realcatcha.com/contact-status?email={user_email}&id={contact_id}"
                 }
                 
     except HTTPException:

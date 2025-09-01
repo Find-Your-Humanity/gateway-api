@@ -21,6 +21,12 @@ def get_google_auth_url():
     """Google OAuth 로그인 URL 생성"""
     import urllib.parse
     
+    # 환경 변수 확인
+    if not GOOGLE_CLIENT_ID:
+        raise ValueError("GOOGLE_CLIENT_ID 환경 변수가 설정되지 않았습니다.")
+    if not GOOGLE_CLIENT_SECRET:
+        raise ValueError("GOOGLE_CLIENT_SECRET 환경 변수가 설정되지 않았습니다.")
+    
     params = {
         'response_type': 'code',
         'client_id': GOOGLE_CLIENT_ID,
