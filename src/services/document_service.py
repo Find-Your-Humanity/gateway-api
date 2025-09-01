@@ -8,7 +8,21 @@ class DocumentService:
         # 문서 저장소 경로
         self.documents_dir = Path(__file__).parent.parent.parent / "documents"
         self.supported_languages = ["ko", "en"]
-        self.supported_document_types = ["developer_guide", "api_reference", "faq", "terms", "privacy"]
+        self.supported_document_types = [
+            "developer_guide", 
+            "api_key_usage_guide", 
+            "설정", 
+            "invisible_captcha", 
+            "custom_theme", 
+            "language_codes", 
+            "faq", 
+            "enterprise_account_management", 
+            "recaptcha_migration", 
+            "mobile_sdk", 
+            "통합", 
+            "pro_features", 
+            "enterprise_overview"
+        ]
         
         # 문서 저장소 초기화
         self._init_document_storage()
