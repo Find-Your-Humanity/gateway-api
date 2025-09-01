@@ -1,0 +1,348 @@
+from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import JSONResponse
+from typing import Optional, Dict, Any
+import os
+import json
+from datetime import datetime, timedelta
+from src.config.database import get_db_connection
+from src.routes.auth import get_current_user_from_request
+
+router = APIRouter(prefix="/api", tags=["captcha"])
+
+def verify_api_key_with_secret(api_key: str, secret_key: str) -> Dict[str, Any]:
+    """
+    API Key와 Secret Key를 함께 검증합니다.
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # API Key와 Secret Key 조회
+                cursor.execute("""
+                    SELECT ak.id, ak.user_id, ak.name, ak.is_active, ak.rate_limit_per_minute, 
+                           ak.rate_limit_per_day, ak.usage_count, ak.last_used_at,
+                           u.email, us.plan_id, p.name as plan_name, p.max_requests_per_month
+                    FROM api_keys ak
+                    JOIN users u ON ak.user_id = u.id
+                    LEFT JOIN user_subscriptions us ON u.id = us.user_id AND us.is_active = 1
+                    LEFT JOIN plans p ON us.plan_id = p.id
+                    WHERE ak.key_id = %s AND ak.secret_key = %s AND ak.is_active = 1
+                """, (api_key, secret_key))
+                
+                result = cursor.fetchone()
+                if not result:
+                    raise HTTPException(status_code=401, detail="Invalid API key or secret key")
+                
+                return {
+                    'api_key_id': result[0],
+                    'user_id': result[1],
+                    'key_name': result[2],
+                    'is_active': result[3],
+                    'rate_limit_per_minute': result[4],
+                    'rate_limit_per_day': result[5],
+                    'usage_count': result[6],
+                    'last_used_at': result[7],
+                    'user_email': result[8],
+                    'plan_id': result[9],
+                    'plan_name': result[10],
+                    'max_requests_per_month': result[11]
+                }
+    except Exception as e:
+        print(f"API 키 검증 오류: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+def verify_api_key_only(api_key: str) -> Dict[str, Any]:
+    """
+    API Key만으로 기본 검증 (클라이언트용)
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # API Key만으로 조회 (Secret Key는 제외)
+                cursor.execute("""
+                    SELECT ak.id, ak.user_id, ak.name, ak.is_active, ak.rate_limit_per_minute, 
+                           ak.rate_limit_per_day, ak.usage_count, ak.last_used_at,
+                           u.email, us.plan_id, p.name as plan_name, p.max_requests_per_month
+                    FROM api_keys ak
+                    JOIN users u ON ak.user_id = u.id
+                    LEFT JOIN user_subscriptions us ON u.id = us.user_id AND us.is_active = 1
+                    LEFT JOIN plans p ON us.plan_id = p.id
+                    WHERE ak.key_id = %s AND ak.is_active = 1
+                """, (api_key,))
+                
+                result = cursor.fetchone()
+                if not result:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
+                
+                return {
+                    'api_key_id': result[0],
+                    'user_id': result[1],
+                    'key_name': result[2],
+                    'is_active': result[3],
+                    'rate_limit_per_minute': result[4],
+                    'rate_limit_per_day': result[5],
+                    'usage_count': result[6],
+                    'last_used_at': result[7],
+                    'user_email': result[8],
+                    'plan_id': result[9],
+                    'plan_name': result[10],
+                    'max_requests_per_month': result[11]
+                }
+    except Exception as e:
+        print(f"API 키 검증 오류: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+def check_rate_limit(api_key_info: Dict[str, Any]) -> bool:
+    """
+    API 키의 사용량 제한을 확인합니다.
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 분당 요청 수 확인
+                cursor.execute("""
+                    SELECT COUNT(*) FROM request_logs 
+                    WHERE api_key_id = %s AND created_at >= DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+                """, (api_key_info['api_key_id'],))
+                
+                minute_count = cursor.fetchone()[0]
+                if minute_count >= api_key_info['rate_limit_per_minute']:
+                    return False
+                
+                # 일일 요청 수 확인
+                cursor.execute("""
+                    SELECT COUNT(*) FROM request_logs 
+                    WHERE api_key_id = %s AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+                """, (api_key_info['api_key_id'],))
+                
+                day_count = cursor.fetchone()[0]
+                if day_count >= api_key_info['rate_limit_per_day']:
+                    return False
+                
+                # 월간 요청 수 확인 (요금제 기준)
+                if api_key_info['max_requests_per_month']:
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM request_logs 
+                        WHERE api_key_id = %s AND created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+                    """, (api_key_info['api_key_id'],))
+                    
+                    month_count = cursor.fetchone()[0]
+                    if month_count >= api_key_info['max_requests_per_month']:
+                        return False
+                
+                return True
+    except Exception as e:
+        print(f"사용량 제한 확인 오류: {e}")
+        return False
+
+def log_api_usage(api_key_info: Dict[str, Any], request_data: Dict[str, Any]):
+    """
+    API 사용량을 로그에 기록합니다.
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # API 키 사용량 업데이트
+                cursor.execute("""
+                    UPDATE api_keys 
+                    SET usage_count = usage_count + 1, last_used_at = NOW() 
+                    WHERE id = %s
+                """, (api_key_info['api_key_id'],))
+                
+                # 요청 로그 기록
+                cursor.execute("""
+                    INSERT INTO request_logs (api_key_id, user_id, endpoint, method, 
+                                            request_data, response_status, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                """, (
+                    api_key_info['api_key_id'],
+                    api_key_info['user_id'],
+                    '/api/next-captcha',
+                    'POST',
+                    json.dumps(request_data),
+                    200
+                ))
+                
+                conn.commit()
+    except Exception as e:
+        print(f"API 사용량 로그 기록 오류: {e}")
+
+@router.post("/next-captcha")
+async def next_captcha(request: Request):
+    """
+    행동 분석 데이터를 받아 다음 캡차 타입을 결정합니다. (클라이언트용 - API Key만 사용)
+    """
+    try:
+        # API 키 헤더에서 추출
+        api_key = request.headers.get('X-API-Key')
+        if not api_key:
+            raise HTTPException(status_code=401, detail="API key required")
+        
+        # API 키만으로 검증 (클라이언트용)
+        api_key_info = verify_api_key_only(api_key)
+        
+        # 사용량 제한 확인
+        if not check_rate_limit(api_key_info):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        
+        # 요청 데이터 파싱
+        request_data = await request.json()
+        behavior_data = request_data.get('behavior_data', {})
+        site_key = request_data.get('site_key', '')
+        
+        # 행동 분석 로직 (간단한 예시)
+        # 실제로는 ML 서비스와 연동하여 봇 탐지 수행
+        mouse_movements = behavior_data.get('mouseMovements', [])
+        mouse_clicks = behavior_data.get('mouseClicks', [])
+        
+        # 간단한 봇 탐지 로직
+        is_bot_detected = False
+        confidence_score = 0.8
+        
+        if len(mouse_movements) < 10:
+            is_bot_detected = True
+            confidence_score = 0.3
+        
+        if len(mouse_clicks) < 2:
+            is_bot_detected = True
+            confidence_score = 0.2
+        
+        # 다음 캡차 타입 결정
+        if is_bot_detected:
+            next_captcha_type = 'imagecaptcha'
+        else:
+            # 랜덤하게 캡차 타입 선택
+            import random
+            captcha_types = ['imagecaptcha', 'handwritingcaptcha', 'abstractcaptcha']
+            next_captcha_type = random.choice(captcha_types)
+        
+        # API 사용량 로그 기록
+        log_api_usage(api_key_info, request_data)
+        
+        # 응답 데이터
+        response_data = {
+            "success": True,
+            "next_captcha": next_captcha_type,
+            "captcha_type": next_captcha_type,
+            "confidence_score": confidence_score,
+            "is_bot_detected": is_bot_detected,
+            "ml_service_used": "basic_behavior_analysis",
+            "api_key_info": {
+                "key_name": api_key_info['key_name'],
+                "usage_count": api_key_info['usage_count'] + 1,
+                "plan_name": api_key_info['plan_name']
+            }
+        }
+        
+        return JSONResponse(content=response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"next-captcha API 오류: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/verify-handwriting")
+async def verify_handwriting(request: Request):
+    """
+    필기 캡차 응답을 검증합니다.
+    """
+    try:
+        # 요청 데이터 파싱
+        request_data = await request.json()
+        image_base64 = request_data.get('image_base64', '')
+        
+        if not image_base64:
+            raise HTTPException(status_code=400, detail="Image data required")
+        
+        # API Key 검증 (헤더에서 추출)
+        api_key = request.headers.get('X-API-Key', '')
+        if not api_key:
+            raise HTTPException(status_code=401, detail="API key required")
+        
+        # API Key 검증
+        api_key_info = verify_api_key_only(api_key)
+        
+        # 사용량 제한 확인
+        if not check_rate_limit(api_key_info):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        
+        # 필기 캡차 검증 로직 (간단한 예시)
+        # 실제로는 ML 서비스와 연동하여 필기 인식 수행
+        is_valid = len(image_base64) > 100  # 간단한 검증 (실제로는 ML 모델 사용)
+        
+        # API 사용량 로그 기록
+        log_api_usage(api_key_info, {"action": "handwriting_verification"})
+        
+        # 응답 데이터
+        response_data = {
+            "success": is_valid,
+            "score": 0.9 if is_valid else 0.0,
+            "action": "handwriting_verification",
+            "challenge_ts": datetime.now().isoformat(),
+            "hostname": request.headers.get('host', ''),
+            "api_key_info": {
+                "key_name": api_key_info['key_name'],
+                "usage_count": api_key_info['usage_count'] + 1,
+                "plan_name": api_key_info['plan_name']
+            }
+        }
+        
+        return JSONResponse(content=response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"verify-handwriting API 오류: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/verify-captcha")
+async def verify_captcha(request: Request):
+    """
+    캡차 응답을 검증합니다. (서버용 - Secret Key 필요)
+    """
+    try:
+        # 요청 데이터 파싱
+        request_data = await request.json()
+        api_key = request_data.get('site_key', '')  # API Key
+        secret_key = request_data.get('secret_key', '')  # Secret Key
+        captcha_response = request_data.get('response', '')
+        captcha_type = request_data.get('captcha_type', '')
+        
+        if not api_key or not secret_key:
+            raise HTTPException(status_code=401, detail="API key and secret key required")
+        
+        # API Key와 Secret Key 함께 검증
+        api_key_info = verify_api_key_with_secret(api_key, secret_key)
+        
+        # 사용량 제한 확인
+        if not check_rate_limit(api_key_info):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        
+        # 캡차 검증 로직 (간단한 예시)
+        # 실제로는 ML 서비스와 연동하여 검증 수행
+        is_valid = len(captcha_response) > 0  # 간단한 검증
+        
+        # API 사용량 로그 기록
+        log_api_usage(api_key_info, request_data)
+        
+        # 응답 데이터
+        response_data = {
+            "success": is_valid,
+            "score": 0.9 if is_valid else 0.0,
+            "action": "captcha_verification",
+            "challenge_ts": datetime.now().isoformat(),
+            "hostname": request.headers.get('host', ''),
+            "api_key_info": {
+                "key_name": api_key_info['key_name'],
+                "usage_count": api_key_info['usage_count'] + 1,
+                "plan_name": api_key_info['plan_name']
+            }
+        }
+        
+        return JSONResponse(content=response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"verify-captcha API 오류: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

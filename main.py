@@ -7,6 +7,7 @@ from src.routes.dashboard import router as dashboard_router
 from src.routes.admin import router as admin_router
 from src.routes.billing import router as billing_router
 from src.routes.api_keys import router as api_keys_router
+from src.routes.captcha import router as captcha_router
 from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.usage_tracking import UsageTrackingMiddleware
 import asyncio
@@ -28,6 +29,7 @@ app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(api_keys_router)
+app.include_router(captcha_router)
 
 # 미들웨어 등록 (순서 중요: CORS -> 로깅)
 app.add_middleware(
@@ -43,6 +45,7 @@ app.add_middleware(
         "http://localhost:8080",
         "http://127.0.0.1",
         "http://127.0.0.1:8080",
+        "http://127.0.0.1:8081",  # 테스트용 추가
         "https://novelike-the-draw.static.hf.space"  # 임시 추가
     ],
     allow_credentials=True,

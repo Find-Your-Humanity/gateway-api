@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from typing import Literal, Optional, List
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
 
@@ -287,3 +287,176 @@ def get_captcha_logs(
         "pageSize": pageSize,
         "total": 0,
     }
+
+
+@router.get("/dashboard/usage-limits")
+def get_usage_limits(request: Request, current_user = Depends(require_auth)):
+    """사용자별 API 사용량 제한 정보 조회"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 사용자 플랜 정보 조회 (users.plan_id → plans 테이블)
+                cursor.execute(
+                    """
+                    SELECT p.plan_type, p.rate_limit_per_minute, p.monthly_request_limit, p.concurrent_requests,
+                           p.display_name, p.features
+                    FROM users u
+                    LEFT JOIN plans p ON u.plan_id = p.id
+                    WHERE u.id = %s
+                    """,
+                    (current_user["id"],)
+                )
+                plan_data = cursor.fetchone()
+                
+                # 기본 플랜 정보 (plan_type이 없으면 'free'로 설정)
+                plan_type = plan_data.get("plan_type", "free") if plan_data else "free"
+                
+                # 플랜별 제한 설정 (plans 테이블에서 가져온 값 또는 기본값)
+                if plan_data:
+                    limits = {
+                        "perMinute": plan_data.get("rate_limit_per_minute", 60),
+                        "perDay": plan_data.get("monthly_request_limit", 1000) / 30,  # 월간 제한을 일일로 나눔
+                        "perMonth": plan_data.get("monthly_request_limit", 30000)
+                    }
+                else:
+                    # 기본 free 플랜 제한
+                    limits = {"perMinute": 60, "perDay": 1000, "perMonth": 30000}
+                
+                # 현재 사용량 조회 (request_logs.request_time 사용)
+                now = datetime.now()
+                
+                # 분당 사용량 (현재 분)
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) as count
+                    FROM request_logs 
+                    WHERE user_id = %s 
+                    AND request_time >= DATE_FORMAT(NOW(), '%%Y-%%m-%%d %%H:%%i:00')
+                    """,
+                    (current_user["id"],)
+                )
+                per_minute_usage = cursor.fetchone().get("count", 0) if cursor.fetchone() else 0
+                
+                # 일일 사용량 (오늘)
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) as count
+                    FROM request_logs 
+                    WHERE user_id = %s 
+                    AND DATE(request_time) = CURDATE()
+                    """,
+                    (current_user["id"],)
+                )
+                per_day_usage = cursor.fetchone().get("count", 0) if cursor.fetchone() else 0
+                
+                # 월간 사용량 (이번 달)
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) as count
+                    FROM request_logs 
+                    WHERE user_id = %s 
+                    AND DATE_FORMAT(request_time, '%%Y-%%m') = DATE_FORMAT(NOW(), '%%Y-%%m')
+                    """,
+                    (current_user["id"],)
+                )
+                per_month_usage = cursor.fetchone().get("count", 0) if cursor.fetchone() else 0
+                
+                # user_subscriptions 테이블에서 현재 구독 정보 확인
+                cursor.execute(
+                    """
+                    SELECT us.current_usage, us.last_reset_at, p.plan_type, p.display_name
+                    FROM user_subscriptions us
+                    JOIN plans p ON us.plan_id = p.id
+                    WHERE us.user_id = %s 
+                    AND us.status = 'active'
+                    AND (us.start_date IS NULL OR us.start_date <= CURDATE())
+                    AND (us.end_date IS NULL OR us.end_date >= CURDATE())
+                    ORDER BY us.created_at DESC
+                    LIMIT 1
+                    """,
+                    (current_user["id"],)
+                )
+                subscription_data = cursor.fetchone()
+                
+                # 구독 정보가 있으면 해당 정보 사용
+                if subscription_data:
+                    plan_type = subscription_data.get("plan_type", plan_type)
+                    plan_display_name = subscription_data.get("display_name", plan_data.get("display_name", plan_type.upper()))
+                    # 구독의 current_usage는 월간 사용량으로 사용 가능
+                    if subscription_data.get("current_usage"):
+                        per_month_usage = subscription_data.get("current_usage")
+                else:
+                    plan_display_name = plan_data.get("display_name", plan_type.upper()) if plan_data else plan_type.upper()
+                
+                # 리셋 시간 계산
+                next_minute = (now.replace(second=0, microsecond=0) + timedelta(minutes=1)).isoformat()
+                next_day = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat()
+                next_month = (now.replace(day=1, hour=0, minute=0, second=0, microsecond=0) + timedelta(days=32)).replace(day=1).isoformat()
+                
+                # 상태 결정
+                def get_status(current, limit):
+                    if current >= limit:
+                        return "exceeded"
+                    elif current >= limit * 0.9:
+                        return "critical"
+                    elif current >= limit * 0.7:
+                        return "warning"
+                    else:
+                        return "normal"
+                
+                status = "normal"
+                if (per_minute_usage >= limits["perMinute"] or 
+                    per_day_usage >= limits["perDay"] or 
+                    per_month_usage >= limits["perMonth"]):
+                    status = "exceeded"
+                elif (per_minute_usage >= limits["perMinute"] * 0.9 or 
+                      per_day_usage >= limits["perDay"] * 0.9 or 
+                      per_month_usage >= limits["perMonth"] * 0.9):
+                    status = "critical"
+                elif (per_minute_usage >= limits["perMinute"] * 0.7 or 
+                      per_day_usage >= limits["perDay"] * 0.7 or 
+                      per_month_usage >= limits["perMonth"] * 0.7):
+                    status = "warning"
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "plan": plan_type,
+                        "planDisplayName": plan_display_name,
+                        "limits": limits,
+                        "currentUsage": {
+                            "perMinute": per_minute_usage,
+                            "perDay": per_day_usage,
+                            "perMonth": per_month_usage
+                        },
+                        "resetTimes": {
+                            "perMinute": next_minute,
+                            "perDay": next_day,
+                            "perMonth": next_month
+                        },
+                        "status": status
+                    }
+                }
+                
+    except Exception as e:
+        # 에러 발생 시 기본값 반환
+        now = datetime.now()
+        next_minute = (now.replace(second=0, microsecond=0) + timedelta(minutes=1)).isoformat()
+        next_day = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat()
+        next_month = (now.replace(day=1, hour=0, minute=0, second=0, microsecond=0) + timedelta(days=32)).replace(day=1).isoformat()
+        
+        return {
+            "success": True,
+            "data": {
+                "plan": "free",
+                "planDisplayName": "FREE",
+                "limits": {"perMinute": 60, "perDay": 1000, "perMonth": 30000},
+                "currentUsage": {"perMinute": 0, "perDay": 0, "perMonth": 0},
+                "resetTimes": {
+                    "perMinute": next_minute,
+                    "perDay": next_day,
+                    "perMonth": next_month
+                },
+                "status": "normal"
+            }
+        }
