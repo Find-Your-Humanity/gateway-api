@@ -46,16 +46,27 @@ async def update_document(
     current_user = Depends(require_admin)
 ):
     """문서 내용 업데이트 (관리자 전용)"""
+    print(f"🔍 문서 업데이트 요청 수신")
+    print(f"🔍 요청 데이터: language={request.language}, document_type={request.document_type}")
+    print(f"🔍 콘텐츠 길이: {len(request.content)}")
+    print(f"🔍 콘텐츠 미리보기: {request.content[:100]}...")
+    print(f"🔍 현재 사용자: {current_user}")
+    
     try:
         result = await document_service.update_document(
             request.language,
             request.document_type,
             request.content
         )
+        print(f"🔍 문서 업데이트 성공: {result}")
         return result
     except HTTPException:
+        print(f"🔍 문서 업데이트 HTTP 오류 발생: {HTTPException}")
         raise
     except Exception as e:
+        print(f"🔍 문서 업데이트 일반 오류 발생: {str(e)}")
+        import traceback
+        print(f"🔍 오류 상세: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"문서 업데이트 중 오류 발생: {str(e)}")
 
 @router.get("/documents", response_model=DocumentResponse)

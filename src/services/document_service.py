@@ -2,6 +2,7 @@ import os
 import json
 from typing import Dict, Any, Optional
 from pathlib import Path
+from datetime import datetime
 
 class DocumentService:
     def __init__(self):
@@ -150,15 +151,20 @@ class DocumentService:
     
     async def update_document(self, language: str, document_type: str, content: str) -> Dict[str, Any]:
         """문서 내용 업데이트"""
+        print(f"🔍 문서 업데이트 서비스 호출: language={language}, document_type={document_type}")
+        print(f"🔍 업데이트할 콘텐츠 길이: {len(content)}")
+        
         try:
             # 지원 언어 및 문서 타입 확인
             if language not in self.supported_languages:
+                print(f"🔍 지원하지 않는 언어: {language}")
                 return {
                     "success": False,
                     "data": {"error": f"Unsupported language: {language}"}
                 }
             
             if document_type not in self.supported_document_types:
+                print(f"🔍 지원하지 않는 문서 타입: {document_type}")
                 return {
                     "success": False,
                     "data": {"error": f"Unsupported document type: {document_type}"}
@@ -166,27 +172,51 @@ class DocumentService:
             
             # 문서 파일 경로
             doc_path = self._get_document_path(language, document_type)
+            print(f"🔍 업데이트할 파일 경로: {doc_path}")
+            print(f"🔍 파일 존재 여부 (업데이트 전): {doc_path.exists()}")
             
-            # 디렉토리 생성 (필요시)
-            doc_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # 파일에 내용 저장
-            doc_path.write_text(content, encoding='utf-8')
-            
-            return {
-                "success": True,
-                "data": {
-                    "language": language,
-                    "document_type": document_type,
-                    "message": "Document updated successfully",
-                    "file_path": str(doc_path)
+            # 파일 저장
+            try:
+                print(f"🔍 파일 저장 시작...")
+                doc_path.write_text(content, encoding='utf-8')
+                print(f"🔍 파일 저장 성공!")
+                print(f"🔍 파일 존재 여부 (업데이트 후): {doc_path.exists()}")
+                print(f"🔍 파일 크기: {doc_path.stat().st_size} bytes")
+                
+                # 저장된 내용 확인
+                saved_content = doc_path.read_text(encoding='utf-8')
+                print(f"🔍 저장된 내용 길이: {len(saved_content)}")
+                print(f"🔍 저장된 내용 미리보기: {saved_content[:100]}...")
+                
+                result = {
+                    "success": True,
+                    "data": {
+                        "message": "문서가 성공적으로 업데이트되었습니다.",
+                        "file_path": str(doc_path),
+                        "content_length": len(content),
+                        "saved_at": str(datetime.now())
+                    }
                 }
-            }
+                
+                print(f"🔍 업데이트 결과: {result}")
+                return result
+                
+            except Exception as write_error:
+                print(f"🔍 파일 저장 오류: {str(write_error)}")
+                import traceback
+                print(f"🔍 파일 저장 오류 상세: {traceback.format_exc()}")
+                return {
+                    "success": False,
+                    "data": {"error": f"파일 저장 중 오류 발생: {str(write_error)}"}
+                }
             
         except Exception as e:
+            print(f"🔍 문서 업데이트 서비스 오류: {str(e)}")
+            import traceback
+            print(f"🔍 오류 상세: {traceback.format_exc()}")
             return {
                 "success": False,
-                "data": {"error": str(e)}
+                "data": {"error": f"문서 업데이트 중 오류 발생: {str(e)}"}
             }
     
     async def list_documents(self, language: Optional[str] = None) -> Dict[str, Any]:

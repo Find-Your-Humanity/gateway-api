@@ -10,6 +10,7 @@ from src.routes.api_keys import router as api_keys_router
 from src.routes.payment_router import router as payments_router
 from src.routes.captcha import router as captcha_router
 from src.routes.admin_documents import router as admin_documents_router
+from src.routes.payment_router import router as payment_router
 from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.usage_tracking import UsageTrackingMiddleware
 from src.services.usage_service import usage_service
