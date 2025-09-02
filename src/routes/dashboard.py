@@ -3,6 +3,7 @@ from typing import Literal, Optional, List
 from datetime import date, timedelta, datetime
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
+from src.middleware.usage_tracking import ApiUsageTracker
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
@@ -376,6 +377,22 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 else:
                     plan_display_name = plan_data.get("display_name", plan_type.upper()) if plan_data else plan_type.upper()
                 
+                # request_logs 테이블에서 실제 사용량 계산 (누락된 부분)
+                cursor.execute("""
+                    SELECT COUNT(*) as monthly_requests
+                    FROM request_logs 
+                    WHERE user_id = %s 
+                    AND request_time >= DATE_FORMAT(NOW(), '%%Y-%%m-01')  -- 이번 달 1일부터
+                    AND request_time < DATE_FORMAT(NOW() + INTERVAL 1 MONTH, '%%Y-%%m-01')  -- 다음 달 1일 전까지
+                """, (current_user["id"],))
+                
+                monthly_requests_result = cursor.fetchone()
+                if monthly_requests_result:
+                    # request_logs에서 계산된 실제 사용량이 있으면 사용
+                    actual_monthly_usage = monthly_requests_result.get("monthly_requests", 0)
+                    if actual_monthly_usage > 0:
+                        per_month_usage = actual_monthly_usage
+                
                 # 리셋 시간 계산
                 next_minute = (now.replace(second=0, microsecond=0) + timedelta(minutes=1)).isoformat()
                 next_day = (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat()
@@ -448,3 +465,50 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 "status": "normal"
             }
         }
+
+@router.get("/dashboard/api-key-usage/{api_key}")
+def get_api_key_usage_stats(
+    api_key: str,
+    request: Request,
+    current_user = Depends(require_auth)
+):
+    """특정 API 키의 사용량 통계 조회"""
+    try:
+        # API 키 소유자 확인
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT user_id FROM api_keys WHERE key_id = %s
+                """, (api_key,))
+                
+                api_key_owner = cursor.fetchone()
+                if not api_key_owner:
+                    raise HTTPException(status_code=404, detail="API 키를 찾을 수 없습니다.")
+                
+                # 본인의 API 키만 조회 가능
+                if api_key_owner['user_id'] != current_user['id']:
+                    raise HTTPException(status_code=403, detail="본인의 API 키만 조회할 수 있습니다.")
+        
+        # API 키 사용량 통계 조회
+        usage_stats = ApiUsageTracker.get_api_key_usage_stats(api_key)
+        
+        if not usage_stats:
+            raise HTTPException(status_code=500, detail="사용량 통계를 조회할 수 없습니다.")
+        
+        return {
+            "success": True,
+            "data": {
+                "apiKey": usage_stats['key_id'],
+                "name": usage_stats['name'],
+                "totalRequests": usage_stats['total_requests'],
+                "successRequests": usage_stats['success_requests'],
+                "failedRequests": usage_stats['failed_requests'],
+                "avgResponseTime": usage_stats['avg_response_time'],
+                "lastUsed": usage_stats['last_used_at'].isoformat() if usage_stats['last_used_at'] else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"API 키 사용량 조회 실패: {e}")

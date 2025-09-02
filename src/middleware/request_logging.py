@@ -4,6 +4,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
+from src.middleware.usage_tracking import ApiUsageTracker
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                         user_id, api_key, path, method, status_code, 
                         response_time, user_agent
                     ))
+                    
+                    # 2. API 키 사용량 추적 (캡차 관련 API인 경우)
+                    if api_key and path.startswith('/api/captcha/'):
+                        ApiUsageTracker.track_api_key_usage(api_key, user_id)
+                    
                     conn.commit()
                     
         except Exception as e:

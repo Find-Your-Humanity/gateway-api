@@ -1,9 +1,13 @@
 import asyncio
-from datetime import date
+import time
+import logging
+from datetime import date, datetime, timedelta
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
+
+logger = logging.getLogger(__name__)
 
 class UsageTrackingMiddleware(BaseHTTPMiddleware):
     """API 호출 시 사용량을 자동으로 추적하는 미들웨어"""
@@ -132,3 +136,101 @@ class UsageTrackingMiddleware(BaseHTTPMiddleware):
         finally:
             cursor.close()
             conn.close()
+
+class ApiUsageTracker:
+    """API 키별 사용량을 실시간으로 추적하는 클래스"""
+    
+    @staticmethod
+    def track_api_key_usage(api_key: str, user_id: int = None):
+        """API 키 사용량을 추적하고 업데이트"""
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    today = datetime.now().date()
+                    current_month = datetime.now().replace(day=1).date()
+                    
+                    # 1. api_keys 테이블의 usage_count 업데이트
+                    cursor.execute("""
+                        UPDATE api_keys 
+                        SET 
+                            usage_count = usage_count + 1,
+                            last_used_at = NOW()
+                        WHERE key_id = %s
+                    """, (api_key,))
+                    
+                    # 2. user_usage_tracking 테이블 업데이트 (사용자별)
+                    if user_id:
+                        # 오늘 데이터가 있는지 확인
+                        cursor.execute("""
+                            SELECT id, per_minute_count, per_day_count, per_month_count
+                            FROM user_usage_tracking
+                            WHERE user_id = %s AND tracking_date = %s
+                        """, (user_id, today))
+                        
+                        existing_record = cursor.fetchone()
+                        
+                        if existing_record:
+                            # 기존 기록 업데이트
+                            cursor.execute("""
+                                UPDATE user_usage_tracking
+                                SET 
+                                    per_minute_count = per_minute_count + 1,
+                                    per_day_count = per_day_count + 1,
+                                    per_month_count = per_month_count + 1,
+                                    last_updated = NOW()
+                                WHERE id = %s
+                            """, (existing_record['id'],))
+                        else:
+                            # 새 기록 생성
+                            cursor.execute("""
+                                INSERT INTO user_usage_tracking
+                                (user_id, tracking_date, per_minute_count, per_day_count, per_month_count)
+                                VALUES (%s, %s, 1, 1, 1)
+                            """, (user_id, today))
+                    
+                    # 3. user_subscriptions 테이블의 current_usage 업데이트
+                    if user_id:
+                        cursor.execute("""
+                            UPDATE user_subscriptions 
+                            SET current_usage = current_usage + 1
+                            WHERE user_id = %s AND status = 'active'
+                        """, (user_id,))
+                    
+                    conn.commit()
+                    logger.info(f"API 키 {api_key} 사용량 추적 완료")
+                    
+        except Exception as e:
+            logger.error(f"API 키 사용량 추적 실패: {e}")
+    
+    @staticmethod
+    def get_api_key_usage_stats(api_key: str):
+        """API 키별 사용량 통계 조회"""
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    # API 키 정보 및 사용량 조회
+                    cursor.execute("""
+                        SELECT 
+                            ak.key_id,
+                            ak.name,
+                            ak.usage_count,
+                            ak.last_used_at,
+                            u.email as user_email,
+                            u.username,
+                            COUNT(rl.id) as total_requests,
+                            COUNT(CASE WHEN rl.status_code = 200 THEN 1 END) as success_requests,
+                            COUNT(CASE WHEN rl.status_code != 200 THEN 1 END) as failed_requests,
+                            ROUND(AVG(rl.response_time), 2) as avg_response_time
+                        FROM api_keys ak
+                        LEFT JOIN users u ON ak.user_id = u.id
+                        LEFT JOIN request_logs rl ON ak.key_id = rl.api_key
+                        WHERE ak.key_id = %s
+                        AND rl.request_time >= CURDATE() - INTERVAL 30 DAY
+                        GROUP BY ak.key_id, ak.name, ak.usage_count, ak.last_used_at, u.email, u.username
+                    """, (api_key,))
+                    
+                    return cursor.fetchone()
+                    
+        except Exception as e:
+            logger.error(f"API 키 사용량 통계 조회 실패: {e}")
+            return None
