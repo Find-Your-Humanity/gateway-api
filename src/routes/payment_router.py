@@ -89,68 +89,64 @@ async def confirm_payment(
             print(f"✅ Toss Payments 결제 승인 성공: {payment_data}")
         
         # 2. 결제 성공 시 DB에 구독 정보 저장
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        try:
-            # 플랜 정보 조회
-            cursor.execute("SELECT id, name, price FROM plans WHERE id = %s AND is_active = 1", (request.plan_id,))
-            plan = cursor.fetchone()
-            
-            if not plan:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="요금제를 찾을 수 없습니다."
-                )
-            
-            # users.plan_id 업데이트
-            cursor.execute("""
-                UPDATE users SET plan_id = %s WHERE id = %s
-            """, (request.plan_id, user["id"]))
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                try:
+                    # 플랜 정보 조회
+                    cursor.execute("SELECT id, name, price FROM plans WHERE id = %s AND is_active = 1", (request.plan_id,))
+                    plan = cursor.fetchone()
+                    
+                    if not plan:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail="요금제를 찾을 수 없습니다."
+                        )
+                    
+                    # users.plan_id 업데이트
+                    cursor.execute("""
+                        UPDATE users SET plan_id = %s WHERE id = %s
+                    """, (request.plan_id, user["id"]))
 
-            # 기존 활성 구독 비활성화
-            cursor.execute("""
-                UPDATE user_subscriptions
-                SET status = 'cancelled', end_date = CURDATE()
-                WHERE user_id = %s AND status = 'active'
-            """, (user["id"],))
+                    # 기존 활성 구독 비활성화
+                    cursor.execute("""
+                        UPDATE user_subscriptions
+                        SET status = 'cancelled', end_date = CURDATE()
+                        WHERE user_id = %s AND status = 'active'
+                    """, (user["id"],))
 
-            # user_subscriptions에 신규 구독 저장 (upsert 성격)
-            cursor.execute("""
-                INSERT INTO user_subscriptions
-                (user_id, plan_id, start_date, end_date, status, amount, currency, payment_method)
-                VALUES (%s, %s, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 MONTH), 'active', %s, 'KRW', 'card')
-            """, (user["id"], request.plan_id, request.amount))
+                    # user_subscriptions에 신규 구독 저장 (upsert 성격)
+                    cursor.execute("""
+                        INSERT INTO user_subscriptions
+                        (user_id, plan_id, start_date, end_date, status, amount, currency, payment_method)
+                        VALUES (%s, %s, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 MONTH), 'active', %s, 'KRW', 'card')
+                    """, (user["id"], request.plan_id, request.amount))
 
-            subscription_id = cursor.lastrowid
+                    subscription_id = cursor.lastrowid
 
-            # payment_logs에 결제 기록 저장
-            cursor.execute("""
-                INSERT INTO payment_logs (user_id, plan_id, paid_at, amount, payment_method, payment_id, status)
-                VALUES (%s, %s, NOW(), %s, 'card', %s, 'completed')
-            """, (user["id"], request.plan_id, request.amount, request.orderId or request.paymentKey))
-            
-            conn.commit()
-            
-            print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
-            
-            return {
-                "success": True,
-                "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
-                "payment_id": request.paymentKey,
-                "plan_id": request.plan_id
-            }
-            
-        except Exception as e:
-            conn.rollback()
-            print(f"❌ DB 저장 오류: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"구독 정보 저장 중 오류가 발생했습니다: {str(e)}"
-            )
-        finally:
-            cursor.close()
-            conn.close()
+                    # payment_logs에 결제 기록 저장
+                    cursor.execute("""
+                        INSERT INTO payment_logs (user_id, plan_id, paid_at, amount, payment_method, payment_id, status)
+                        VALUES (%s, %s, NOW(), %s, 'card', %s, 'completed')
+                    """, (user["id"], request.plan_id, request.amount, request.orderId or request.paymentKey))
+                    
+                    conn.commit()
+                    
+                    print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
+                    
+                    return {
+                        "success": True,
+                        "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
+                        "payment_id": request.paymentKey,
+                        "plan_id": request.plan_id
+                    }
+                    
+                except Exception as e:
+                    conn.rollback()
+                    print(f"❌ DB 저장 오류: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"구독 정보 저장 중 오류가 발생했습니다: {str(e)}"
+                    )
             
     except HTTPException:
         raise
@@ -172,76 +168,72 @@ async def complete_payment(
     try:
         print(f"🔍 결제 완료 처리 - 사용자 ID: {user['id']}, 플랜 ID: {request.plan_id}")
         
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        try:
-            # 플랜 정보 조회
-            cursor.execute("SELECT id, name, price FROM plans WHERE id = %s AND is_active = 1", (request.plan_id,))
-            plan = cursor.fetchone()
-            
-            if not plan:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="요금제를 찾을 수 없습니다."
-                )
-            
-            # 중복 결제 처리 방지
-            cursor.execute("""
-                SELECT id FROM payments WHERE payment_id = %s AND user_id = %s
-            """, (request.paymentKey, user["id"]))
-            
-            existing_payment = cursor.fetchone()
-            if existing_payment:
-                return {
-                    "success": True,
-                    "message": f"{plan[1]} 요금제 구독이 이미 완료되었습니다.",
-                    "payment_id": request.paymentKey,
-                    "plan_id": request.plan_id
-                }
-            
-            # users.plan_id 업데이트
-            cursor.execute("""
-                UPDATE users SET plan_id = %s WHERE id = %s
-            """, (request.plan_id, user["id"]))
-            
-            # subscriptions 테이블에 구독 정보 저장
-            cursor.execute("""
-                INSERT INTO subscriptions (user_id, plan_id, started_at, amount, payment_method, status)
-                VALUES (%s, %s, NOW(), %s, 'card', 'active')
-            """, (user["id"], request.plan_id, request.amount))
-            
-            subscription_id = cursor.lastrowid
-            
-            # payments 테이블에 결제 기록 저장
-            cursor.execute("""
-                INSERT INTO payments (subscription_id, user_id, payment_id, amount, currency, 
-                                   payment_method, payment_gateway, status, processed_at, gateway_response)
-                VALUES (%s, %s, %s, %s, 'KRW', 'card', 'toss', 'completed', NOW(), %s)
-            """, (subscription_id, user["id"], request.paymentKey, request.amount, 
-                  '{"status": "completed", "gateway": "toss"}'))
-            
-            conn.commit()
-            
-            print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
-            
-            return {
-                "success": True,
-                "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
-                "payment_id": request.paymentKey,
-                "plan_id": request.plan_id
-            }
-            
-        except Exception as e:
-            conn.rollback()
-            print(f"❌ DB 저장 오류: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"구독 정보 저장 중 오류가 발생했습니다: {str(e)}"
-            )
-        finally:
-            cursor.close()
-            conn.close()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                try:
+                    # 플랜 정보 조회
+                    cursor.execute("SELECT id, name, price FROM plans WHERE id = %s AND is_active = 1", (request.plan_id,))
+                    plan = cursor.fetchone()
+                    
+                    if not plan:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail="요금제를 찾을 수 없습니다."
+                        )
+                    
+                    # 중복 결제 처리 방지
+                    cursor.execute("""
+                        SELECT id FROM payments WHERE payment_id = %s AND user_id = %s
+                    """, (request.paymentKey, user["id"]))
+                    
+                    existing_payment = cursor.fetchone()
+                    if existing_payment:
+                        return {
+                            "success": True,
+                            "message": f"{plan[1]} 요금제 구독이 이미 완료되었습니다.",
+                            "payment_id": request.paymentKey,
+                            "plan_id": request.plan_id
+                        }
+                    
+                    # users.plan_id 업데이트
+                    cursor.execute("""
+                        UPDATE users SET plan_id = %s WHERE id = %s
+                    """, (request.plan_id, user["id"]))
+                    
+                    # subscriptions 테이블에 구독 정보 저장
+                    cursor.execute("""
+                        INSERT INTO subscriptions (user_id, plan_id, started_at, amount, payment_method, status)
+                        VALUES (%s, %s, NOW(), %s, 'card', 'active')
+                    """, (user["id"], request.plan_id, request.amount))
+                    
+                    subscription_id = cursor.lastrowid
+                    
+                    # payments 테이블에 결제 기록 저장
+                    cursor.execute("""
+                        INSERT INTO payments (subscription_id, user_id, payment_id, amount, currency, 
+                                           payment_method, payment_gateway, status, processed_at, gateway_response)
+                        VALUES (%s, %s, %s, %s, 'KRW', 'card', 'toss', 'completed', NOW(), %s)
+                    """, (subscription_id, user["id"], request.paymentKey, request.amount, 
+                          '{"status": "completed", "gateway": "toss"}'))
+                    
+                    conn.commit()
+                    
+                    print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
+                    
+                    return {
+                        "success": True,
+                        "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
+                        "payment_id": request.paymentKey,
+                        "plan_id": request.plan_id
+                    }
+                    
+                except Exception as e:
+                    conn.rollback()
+                    print(f"❌ DB 저장 오류: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"구독 정보 저장 중 오류가 발생했습니다: {str(e)}"
+                    )
             
     except HTTPException:
         raise
