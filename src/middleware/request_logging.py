@@ -10,6 +10,17 @@ logger = logging.getLogger(__name__)
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """API 요청을 자동으로 로깅하는 미들웨어"""
     
+    # 로깅에서 제외할 경로들
+    EXCLUDED_PATHS = [
+        "/health",           # 헬스체크
+        "/metrics",          # 메트릭스
+        "/favicon.ico",      # 파비콘
+        "/robots.txt",       # 로봇 텍스트
+        "/.well-known/",     # 웰노운 경로
+        "/ping",             # 핑
+        "/status"            # 상태
+    ]
+    
     async def dispatch(self, request: Request, call_next):
         # 요청 시작 시간 기록
         start_time = time.time()
@@ -18,6 +29,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method
         user_agent = request.headers.get("user-agent", "")
+        
+        # 제외할 경로 체크 - 로깅하지 않고 바로 응답
+        if any(path.startswith(excluded_path) for excluded_path in self.EXCLUDED_PATHS):
+            logger.debug(f"로깅 제외 경로: {path} - 헬스체크/모니터링용")
+            response = await call_next(request)
+            return response
         
         # 사용자 정보 추출 (인증된 경우)
         user_id = None
