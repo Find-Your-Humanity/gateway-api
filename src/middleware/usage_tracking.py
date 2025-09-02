@@ -147,54 +147,62 @@ class ApiUsageTracker:
             with get_db_connection() as conn:
                 with conn.cursor() as cursor:
                     today = datetime.now().date()
-                    current_month = datetime.now().replace(day=1).date()
                     
-                    # 1. api_keys 테이블의 usage_count 업데이트
-                    cursor.execute("""
-                        UPDATE api_keys 
-                        SET 
-                            usage_count = usage_count + 1,
-                            last_used_at = NOW()
-                        WHERE key_id = %s
-                    """, (api_key,))
-                    
-                    # 2. user_usage_tracking 테이블 업데이트 (사용자별)
-                    if user_id:
-                        # 오늘 데이터가 있는지 확인
+                    # 1. api_keys 테이블의 usage_count 업데이트 (안전하게)
+                    try:
                         cursor.execute("""
-                            SELECT id, per_minute_count, per_day_count, per_month_count
-                            FROM user_usage_tracking
-                            WHERE user_id = %s AND tracking_date = %s
-                        """, (user_id, today))
-                        
-                        existing_record = cursor.fetchone()
-                        
-                        if existing_record:
-                            # 기존 기록 업데이트
+                            UPDATE api_keys 
+                            SET 
+                                usage_count = COALESCE(usage_count, 0) + 1,
+                                last_used_at = NOW()
+                            WHERE key_id = %s
+                        """, (api_key,))
+                    except Exception as e:
+                        logger.warning(f"api_keys 테이블 업데이트 실패: {e}")
+                    
+                    # 2. user_usage_tracking 테이블 업데이트 (사용자별, 안전하게)
+                    if user_id:
+                        try:
+                            # 오늘 데이터가 있는지 확인
                             cursor.execute("""
-                                UPDATE user_usage_tracking
-                                SET 
-                                    per_minute_count = per_minute_count + 1,
-                                    per_day_count = per_day_count + 1,
-                                    per_month_count = per_month_count + 1,
-                                    last_updated = NOW()
-                                WHERE id = %s
-                            """, (existing_record['id'],))
-                        else:
-                            # 새 기록 생성
-                            cursor.execute("""
-                                INSERT INTO user_usage_tracking
-                                (user_id, tracking_date, per_minute_count, per_day_count, per_month_count)
-                                VALUES (%s, %s, 1, 1, 1)
+                                SELECT id, per_minute_count, per_day_count, per_month_count
+                                FROM user_usage_tracking
+                                WHERE user_id = %s AND tracking_date = %s
                             """, (user_id, today))
+                            
+                            existing_record = cursor.fetchone()
+                            
+                            if existing_record:
+                                # 기존 기록 업데이트
+                                cursor.execute("""
+                                    UPDATE user_usage_tracking
+                                    SET 
+                                        per_minute_count = COALESCE(per_minute_count, 0) + 1,
+                                        per_day_count = COALESCE(per_day_count, 0) + 1,
+                                        per_month_count = COALESCE(per_month_count, 0) + 1,
+                                        last_updated = NOW()
+                                    WHERE id = %s
+                                """, (existing_record['id'],))
+                            else:
+                                # 새 기록 생성
+                                cursor.execute("""
+                                    INSERT INTO user_usage_tracking
+                                    (user_id, tracking_date, per_minute_count, per_day_count, per_month_count)
+                                    VALUES (%s, %s, 1, 1, 1)
+                                """, (user_id, today))
+                        except Exception as e:
+                            logger.warning(f"user_usage_tracking 테이블 업데이트 실패: {e}")
                     
-                    # 3. user_subscriptions 테이블의 current_usage 업데이트
+                    # 3. user_subscriptions 테이블의 current_usage 업데이트 (안전하게)
                     if user_id:
-                        cursor.execute("""
-                            UPDATE user_subscriptions 
-                            SET current_usage = current_usage + 1
-                            WHERE user_id = %s AND status = 'active'
-                        """, (user_id,))
+                        try:
+                            cursor.execute("""
+                                UPDATE user_subscriptions 
+                                SET current_usage = COALESCE(current_usage, 0) + 1
+                                WHERE user_id = %s AND status = 'active'
+                            """, (user_id,))
+                        except Exception as e:
+                            logger.warning(f"user_subscriptions 테이블 업데이트 실패: {e}")
                     
                     conn.commit()
                     logger.info(f"API 키 {api_key} 사용량 추적 완료")
@@ -208,7 +216,7 @@ class ApiUsageTracker:
         try:
             with get_db_connection() as conn:
                 with conn.cursor() as cursor:
-                    # API 키 정보 및 사용량 조회
+                    # 1. API 키 기본 정보 조회
                     cursor.execute("""
                         SELECT 
                             ak.key_id,
@@ -216,20 +224,58 @@ class ApiUsageTracker:
                             ak.usage_count,
                             ak.last_used_at,
                             u.email as user_email,
-                            u.username,
-                            COUNT(rl.id) as total_requests,
-                            COUNT(CASE WHEN rl.status_code = 200 THEN 1 END) as success_requests,
-                            COUNT(CASE WHEN rl.status_code != 200 THEN 1 END) as failed_requests,
-                            ROUND(AVG(rl.response_time), 2) as avg_response_time
+                            u.username
                         FROM api_keys ak
                         LEFT JOIN users u ON ak.user_id = u.id
-                        LEFT JOIN request_logs rl ON ak.key_id = rl.api_key
                         WHERE ak.key_id = %s
-                        AND rl.request_time >= CURDATE() - INTERVAL 30 DAY
-                        GROUP BY ak.key_id, ak.name, ak.usage_count, ak.last_used_at, u.email, u.username
                     """, (api_key,))
                     
-                    return cursor.fetchone()
+                    api_key_info = cursor.fetchone()
+                    if not api_key_info:
+                        return None
+                    
+                    # 2. 요청 통계 조회 (별도 쿼리로 분리)
+                    cursor.execute("""
+                        SELECT 
+                            COUNT(*) as total_requests,
+                            COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_requests,
+                            COUNT(CASE WHEN status_code != 200 THEN 1 END) as failed_requests,
+                            ROUND(AVG(response_time), 2) as avg_response_time
+                        FROM request_logs 
+                        WHERE api_key = %s
+                        AND request_time >= CURDATE() - INTERVAL 30 DAY
+                    """, (api_key,))
+                    
+                    stats_info = cursor.fetchone()
+                    
+                    # 3. 결과 합치기
+                    if stats_info:
+                        return {
+                            'key_id': api_key_info['key_id'],
+                            'name': api_key_info['name'],
+                            'usage_count': api_key_info['usage_count'],
+                            'last_used_at': api_key_info['last_used_at'],
+                            'user_email': api_key_info['user_email'],
+                            'username': api_key_info['username'],
+                            'total_requests': stats_info['total_requests'],
+                            'success_requests': stats_info['success_requests'],
+                            'failed_requests': stats_info['failed_requests'],
+                            'avg_response_time': stats_info['avg_response_time']
+                        }
+                    else:
+                        # 통계가 없는 경우 기본값으로 반환
+                        return {
+                            'key_id': api_key_info['key_id'],
+                            'name': api_key_info['name'],
+                            'usage_count': api_key_info['usage_count'],
+                            'last_used_at': api_key_info['last_used_at'],
+                            'user_email': api_key_info['user_email'],
+                            'username': api_key_info['username'],
+                            'total_requests': 0,
+                            'success_requests': 0,
+                            'failed_requests': 0,
+                            'avg_response_time': 0
+                        }
                     
         except Exception as e:
             logger.error(f"API 키 사용량 통계 조회 실패: {e}")
