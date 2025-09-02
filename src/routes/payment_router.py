@@ -36,38 +36,45 @@ async def confirm_payment(
     try:
         print(f"🔍 결제 승인 요청 - 사용자 ID: {user['id']}, 플랜 ID: {request.plan_id}")
         
-        # 1. Toss Payments 결제 승인 API 호출
-        headers = {
-            "Authorization": f"Basic {base64.b64encode(f'{TOSS_SECRET_KEY}:'.encode()).decode()}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "paymentKey": request.paymentKey,
-            "orderId": request.orderId,
-            "amount": request.amount
-        }
-        
-        print(f"📤 Toss Payments API 호출: {payload}")
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                TOSS_API_URL,
-                headers=headers,
-                json=payload
-            )
-        
-        print(f"📥 Toss Payments 응답: {response.status_code}")
-        
-        if response.status_code != 200:
-            print(f"❌ Toss Payments API 오류: {response.text}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"결제 승인 실패: {response.text}"
-            )
-        
-        payment_data = response.json()
-        print(f"✅ Toss Payments 결제 승인 성공: {payment_data}")
+        # 1. 결제 승인 (DASHBOARD_DIRECT는 내장 승인 경로)
+        payment_data = None
+        if request.paymentKey == 'DASHBOARD_DIRECT':
+            print("🟦 대시보드 직접 결제 승인(DASHBOARD_DIRECT) 경로")
+            payment_data = {
+                "paymentKey": request.paymentKey,
+                "orderId": request.orderId,
+                "approvedAt": datetime.utcnow().isoformat() + 'Z',
+                "amount": request.amount,
+                "status": "DONE",
+                "method": "card",
+                "provider": "internal"
+            }
+        else:
+            headers = {
+                "Authorization": f"Basic {base64.b64encode(f'{TOSS_SECRET_KEY}:'.encode()).decode()}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "paymentKey": request.paymentKey,
+                "orderId": request.orderId,
+                "amount": request.amount
+            }
+            print(f"📤 Toss Payments API 호출: {payload}")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    TOSS_API_URL,
+                    headers=headers,
+                    json=payload
+                )
+            print(f"📥 Toss Payments 응답: {response.status_code}")
+            if response.status_code != 200:
+                print(f"❌ Toss Payments API 오류: {response.text}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"결제 승인 실패: {response.text}"
+                )
+            payment_data = response.json()
+            print(f"✅ Toss Payments 결제 승인 성공: {payment_data}")
         
         # 2. 결제 성공 시 DB에 구독 정보 저장
         conn = get_db_connection()
@@ -88,22 +95,28 @@ async def confirm_payment(
             cursor.execute("""
                 UPDATE users SET plan_id = %s WHERE id = %s
             """, (request.plan_id, user["id"]))
-            
-            # subscriptions 테이블에 구독 정보 저장
+
+            # 기존 활성 구독 비활성화
             cursor.execute("""
-                INSERT INTO subscriptions (user_id, plan_id, started_at, amount, payment_method, status)
-                VALUES (%s, %s, NOW(), %s, 'card', 'active')
+                UPDATE user_subscriptions
+                SET status = 'cancelled', end_date = CURDATE()
+                WHERE user_id = %s AND status = 'active'
+            """, (user["id"],))
+
+            # user_subscriptions에 신규 구독 저장 (upsert 성격)
+            cursor.execute("""
+                INSERT INTO user_subscriptions
+                (user_id, plan_id, start_date, end_date, status, amount, currency, payment_method)
+                VALUES (%s, %s, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 MONTH), 'active', %s, 'KRW', 'card')
             """, (user["id"], request.plan_id, request.amount))
-            
+
             subscription_id = cursor.lastrowid
-            
-            # payments 테이블에 결제 기록 저장
+
+            # payment_logs에 결제 기록 저장
             cursor.execute("""
-                INSERT INTO payments (subscription_id, user_id, payment_id, amount, currency, 
-                                   payment_method, payment_gateway, status, processed_at, gateway_response)
-                VALUES (%s, %s, %s, %s, 'KRW', 'card', 'toss', 'completed', NOW(), %s)
-            """, (subscription_id, user["id"], request.paymentKey, request.amount, 
-                  str(payment_data)))
+                INSERT INTO payment_logs (user_id, plan_id, paid_at, amount, payment_method, payment_id, status)
+                VALUES (%s, %s, NOW(), %s, 'card', %s, 'completed')
+            """, (user["id"], request.plan_id, request.amount, request.orderId or request.paymentKey))
             
             conn.commit()
             
