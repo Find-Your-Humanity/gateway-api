@@ -248,21 +248,37 @@ async def complete_payment(
                     print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
                     print(f"🎯 응답 생성 시작...")
                     
-                    print(f"📝 plan[1] 값: {plan[1]}")
+                    print(f"📝 plan 전체 값: {plan}")
+                    print(f"📝 plan 타입: {type(plan)}")
+                    print(f"📝 plan 길이: {len(plan) if plan else 'None'}")
+                    
+                    if plan and len(plan) > 1:
+                        print(f"📝 plan[1] 값: {plan[1]}")
+                        print(f"📝 plan[1] 타입: {type(plan[1])}")
+                    else:
+                        print(f"❌ plan 데이터 부족: {plan}")
+                    
                     print(f"📝 request.paymentKey 값: {request.paymentKey}")
                     print(f"📝 request.plan_id 값: {request.plan_id}")
                     
                     try:
+                        # plan 데이터 안전성 검사
+                        if not plan or len(plan) < 2:
+                            print(f"⚠️ plan 데이터 부족, 기본 메시지 사용")
+                            plan_name = "요금제"
+                        else:
+                            plan_name = str(plan[1]) if plan[1] else "요금제"
+                            print(f"✅ plan_name 추출 성공: {plan_name}")
+                        
                         response_data = {
                             "success": True,
-                            "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
+                            "message": f"{plan_name} 요금제 구독이 완료되었습니다.",
                             "payment_id": request.paymentKey,
                             "plan_id": request.plan_id
                         }
                         print(f"✅ response_data 생성 완료: {response_data}")
                     except Exception as response_error:
                         print(f"❌ response_data 생성 실패: {response_error}")
-                        # 응답 생성 실패 시에도 기본 응답 반환
                         print(f"⚠️ 기본 응답으로 대체")
                         return {
                             "success": True,
