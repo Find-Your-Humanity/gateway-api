@@ -437,7 +437,7 @@ def aggregate_endpoint_usage_daily(days: int = 30) -> int:
                            ROUND(AVG(COALESCE(response_time, 0))) AS avg_ms
                     FROM request_logs
                     WHERE request_time >= CURDATE() - INTERVAL {days} DAY
-                    GROUP BY DATE(request_time), COALESCE(api_key, '')
+                    GROUP BY DATE(request_time), CONCAT('api_key:', COALESCE(api_key, ''))
                     ON DUPLICATE KEY UPDATE
                       requests=VALUES(requests),
                       avg_ms=VALUES(avg_ms)

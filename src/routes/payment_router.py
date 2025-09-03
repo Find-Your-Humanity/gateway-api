@@ -202,8 +202,8 @@ async def complete_payment(
                     
                     # user_subscriptions 테이블에 구독 정보 저장
                     cursor.execute("""
-                        INSERT INTO user_subscriptions (user_id, plan_id, start_date, status, amount, currency, payment_method)
-                        VALUES (%s, %s, CURDATE(), 'active', %s, 'KRW', 'card')
+                        INSERT INTO user_subscriptions (user_id, plan_id, start_date, end_date, status, amount, currency, payment_method, current_usage, last_reset_at)
+                        VALUES (%s, %s, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 MONTH), 'active', %s, 'KRW', 'card', 0, NOW())
                     """, (user["id"], request.plan_id, request.amount))
                     
                     subscription_id = cursor.lastrowid
