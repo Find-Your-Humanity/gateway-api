@@ -241,16 +241,22 @@ async def complete_payment(
                             "plan_id": request.plan_id
                         }
                     
+                    print(f"🔄 커밋 시작...")
                     conn.commit()
+                    print(f"✅ 커밋 완료")
                     
                     print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
+                    print(f"🎯 응답 생성 시작...")
                     
-                    return {
+                    response_data = {
                         "success": True,
                         "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
                         "payment_id": request.paymentKey,
                         "plan_id": request.plan_id
                     }
+                    
+                    print(f"✅ 응답 생성 완료: {response_data}")
+                    return response_data
                     
                 except Exception as e:
                     conn.rollback()
