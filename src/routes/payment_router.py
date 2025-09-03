@@ -243,9 +243,18 @@ async def complete_payment(
                         print(f"⚠️ payment_logs 저장 실패했지만 구독은 유지됨 (ID: {subscription_id})")
                         # payment_logs 오류는 무시하고 성공 응답
                         conn.commit()
+                        
+                        # plan 데이터에서 요금제 이름 추출 (dict 또는 tuple 모두 지원)
+                        if isinstance(plan, dict):
+                            plan_name = plan.get('name', '요금제')
+                        elif plan and len(plan) > 1:
+                            plan_name = str(plan[1]) if plan[1] else '요금제'
+                        else:
+                            plan_name = '요금제'
+                        
                         return {
                             "success": True,
-                            "message": f"{plan[1]} 요금제 구독이 완료되었습니다. (결제 로그 저장 실패)",
+                            "message": f"{plan_name} 요금제 구독이 완료되었습니다. (결제 로그 저장 실패)",
                             "payment_id": request.paymentKey,
                             "plan_id": request.plan_id
                         }
@@ -261,7 +270,11 @@ async def complete_payment(
                     print(f"📝 plan 타입: {type(plan)}")
                     print(f"📝 plan 길이: {len(plan) if plan else 'None'}")
                     
-                    if plan and len(plan) > 1:
+                    # plan 데이터 안전하게 출력 (인덱스 접근 제거)
+                    if isinstance(plan, dict):
+                        print(f"📝 plan['name'] 값: {plan.get('name', 'N/A')}")
+                        print(f"📝 plan['id'] 값: {plan.get('id', 'N/A')}")
+                    elif plan and len(plan) > 1:
                         print(f"📝 plan[1] 값: {plan[1]}")
                         print(f"📝 plan[1] 타입: {type(plan[1])}")
                     else:
