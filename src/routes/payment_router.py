@@ -248,14 +248,30 @@ async def complete_payment(
                     print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
                     print(f"🎯 응답 생성 시작...")
                     
-                    response_data = {
-                        "success": True,
-                        "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
-                        "payment_id": request.paymentKey,
-                        "plan_id": request.plan_id
-                    }
+                    print(f"📝 plan[1] 값: {plan[1]}")
+                    print(f"📝 request.paymentKey 값: {request.paymentKey}")
+                    print(f"📝 request.plan_id 값: {request.plan_id}")
                     
-                    print(f"✅ 응답 생성 완료: {response_data}")
+                    try:
+                        response_data = {
+                            "success": True,
+                            "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
+                            "payment_id": request.paymentKey,
+                            "plan_id": request.plan_id
+                        }
+                        print(f"✅ response_data 생성 완료: {response_data}")
+                    except Exception as response_error:
+                        print(f"❌ response_data 생성 실패: {response_error}")
+                        # 응답 생성 실패 시에도 기본 응답 반환
+                        print(f"⚠️ 기본 응답으로 대체")
+                        return {
+                            "success": True,
+                            "message": "요금제 구독이 완료되었습니다.",
+                            "payment_id": "unknown",
+                            "plan_id": request.plan_id
+                        }
+                    
+                    print(f"🔄 return 시작...")
                     return response_data
                     
                 except Exception as e:
