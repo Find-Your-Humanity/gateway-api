@@ -261,32 +261,17 @@ async def complete_payment(
                     print(f"📝 request.paymentKey 값: {request.paymentKey}")
                     print(f"📝 request.plan_id 값: {request.plan_id}")
                     
-                    try:
-                        # plan 데이터 안전성 검사
-                        if not plan or len(plan) < 2:
-                            print(f"⚠️ plan 데이터 부족, 기본 메시지 사용")
-                            plan_name = "요금제"
-                        else:
-                            plan_name = str(plan[1]) if plan[1] else "요금제"
-                            print(f"✅ plan_name 추출 성공: {plan_name}")
-                        
-                        response_data = {
-                            "success": True,
-                            "message": f"{plan_name} 요금제 구독이 완료되었습니다.",
-                            "payment_id": request.paymentKey,
-                            "plan_id": request.plan_id
-                        }
-                        print(f"✅ response_data 생성 완료: {response_data}")
-                    except Exception as response_error:
-                        print(f"❌ response_data 생성 실패: {response_error}")
-                        print(f"⚠️ 기본 응답으로 대체")
-                        return {
-                            "success": True,
-                            "message": "요금제 구독이 완료되었습니다.",
-                            "payment_id": "unknown",
-                            "plan_id": request.plan_id
-                        }
+                    # 안전한 응답 생성 (plan 데이터 접근 최소화)
+                    print(f"🔄 기본 응답 생성 시작...")
                     
+                    response_data = {
+                        "success": True,
+                        "message": "요금제 구독이 완료되었습니다.",
+                        "payment_id": request.paymentKey,
+                        "plan_id": request.plan_id
+                    }
+                    
+                    print(f"✅ response_data 생성 완료: {response_data}")
                     print(f"🔄 return 시작...")
                     return response_data
                     
