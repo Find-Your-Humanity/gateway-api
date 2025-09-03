@@ -138,9 +138,17 @@ async def confirm_payment(
                     
                     print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
                     
+                    # plan 데이터에서 요금제 이름 추출 (dict 또는 tuple 모두 지원)
+                    if isinstance(plan, dict):
+                        plan_name = plan.get('name', '요금제')
+                    elif plan and len(plan) > 1:
+                        plan_name = str(plan[1]) if plan[1] else '요금제'
+                    else:
+                        plan_name = '요금제'
+                    
                     return {
                         "success": True,
-                        "message": f"{plan[1]} 요금제 구독이 완료되었습니다.",
+                        "message": f"{plan_name} 요금제 구독이 완료되었습니다.",
                         "payment_id": request.paymentKey,
                         "plan_id": request.plan_id
                     }
@@ -197,9 +205,10 @@ async def complete_payment(
                     
                     existing_payment = cursor.fetchone()
                     if existing_payment:
+                        plan_name = plan.get('name', '요금제') if isinstance(plan, dict) else (plan[1] if plan and len(plan) > 1 else '요금제')
                         return {
                             "success": True,
-                            "message": f"{plan[1]} 요금제 구독이 이미 완료되었습니다.",
+                            "message": f"{plan_name} 요금제 구독이 이미 완료되었습니다.",
                             "payment_id": request.orderId,
                             "plan_id": request.plan_id
                         }
@@ -261,12 +270,23 @@ async def complete_payment(
                     print(f"📝 request.paymentKey 값: {request.paymentKey}")
                     print(f"📝 request.plan_id 값: {request.plan_id}")
                     
-                    # 안전한 응답 생성 (plan 데이터 접근 최소화)
-                    print(f"🔄 기본 응답 생성 시작...")
+                    # 안전한 응답 생성 (plan 데이터 타입에 맞게 처리)
+                    print(f"🔄 응답 생성 시작...")
+                    
+                    # plan 데이터에서 요금제 이름 추출 (dict 또는 tuple 모두 지원)
+                    if isinstance(plan, dict):
+                        plan_name = plan.get('name', '요금제')
+                        print(f"✅ dict에서 plan_name 추출: {plan_name}")
+                    elif plan and len(plan) > 1:
+                        plan_name = str(plan[1]) if plan[1] else '요금제'
+                        print(f"✅ tuple에서 plan_name 추출: {plan_name}")
+                    else:
+                        plan_name = '요금제'
+                        print(f"⚠️ 기본 plan_name 사용: {plan_name}")
                     
                     response_data = {
                         "success": True,
-                        "message": "요금제 구독이 완료되었습니다.",
+                        "message": f"{plan_name} 요금제 구독이 완료되었습니다.",
                         "payment_id": request.paymentKey,
                         "plan_id": request.plan_id
                     }
