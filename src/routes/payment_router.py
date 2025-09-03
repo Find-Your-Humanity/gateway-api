@@ -213,6 +213,13 @@ async def complete_payment(
                             "plan_id": request.plan_id
                         }
                     
+                    # 기존 활성 구독 비활성화 (중복 방지)
+                    cursor.execute("""
+                        UPDATE user_subscriptions
+                        SET status = 'cancelled', end_date = CURDATE()
+                        WHERE user_id = %s AND status = 'active'
+                    """, (user["id"],))
+                    
                     # users.plan_id 업데이트
                     cursor.execute("""
                         UPDATE users SET plan_id = %s WHERE id = %s
