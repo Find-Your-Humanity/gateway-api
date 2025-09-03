@@ -4,9 +4,14 @@ from pydantic import BaseModel
 import httpx
 import base64
 import os
+import uuid
 from datetime import datetime
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
+
+def generate_unique_payment_id() -> str:
+    """고유한 결제 ID 생성"""
+    return f"PAY_{uuid.uuid4().hex[:16].upper()}"
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -181,17 +186,17 @@ async def complete_payment(
                             detail="요금제를 찾을 수 없습니다."
                         )
                     
-                    # 중복 결제 처리 방지
+                    # 중복 결제 처리 방지 (orderId 기준)
                     cursor.execute("""
                         SELECT id FROM payment_logs WHERE payment_id = %s AND user_id = %s
-                    """, (request.paymentKey, user["id"]))
+                    """, (request.orderId, user["id"]))
                     
                     existing_payment = cursor.fetchone()
                     if existing_payment:
                         return {
                             "success": True,
                             "message": f"{plan[1]} 요금제 구독이 이미 완료되었습니다.",
-                            "payment_id": request.paymentKey,
+                            "payment_id": request.orderId,
                             "plan_id": request.plan_id
                         }
                     
@@ -208,11 +213,14 @@ async def complete_payment(
                     
                     subscription_id = cursor.lastrowid
                     
+                    # 고유한 payment_id 생성
+                    unique_payment_id = generate_unique_payment_id()
+                    
                     # payment_logs 테이블에 결제 기록 저장
                     cursor.execute("""
                         INSERT INTO payment_logs (user_id, plan_id, paid_at, amount, payment_method, payment_id, status)
                         VALUES (%s, %s, NOW(), %s, 'card', %s, 'completed')
-                    """, (user["id"], request.plan_id, request.amount, request.paymentKey))
+                    """, (user["id"], request.plan_id, request.amount, unique_payment_id))
                     
                     conn.commit()
                     
