@@ -251,37 +251,39 @@ async def get_payment_status(
 ):
     """결제 상태 조회"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("""
-                SELECT pl.status, pl.paid_at, pl.amount, p.name as plan_name
-                FROM payment_logs pl
-                JOIN user_subscriptions us ON pl.user_id = us.user_id
-                JOIN plans p ON us.plan_id = p.id
-                WHERE pl.payment_id = %s AND pl.user_id = %s
-            """, (order_id, user["id"]))
-            
-            payment_info = cursor.fetchone()
-            
-            if not payment_info:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="결제 정보를 찾을 수 없습니다."
-                )
-            
-            return {
-                "success": True,
-                "status": payment_info[0],
-                "processed_at": payment_info[1].isoformat() if payment_info[1] else None,
-                "amount": payment_info[2],
-                "plan_name": payment_info[3]
-            }
-            
-        finally:
-            cursor.close()
-            conn.close()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                try:
+                    cursor.execute("""
+                        SELECT pl.status, pl.paid_at, pl.amount, p.name as plan_name
+                        FROM payment_logs pl
+                        JOIN user_subscriptions us ON pl.user_id = us.user_id
+                        JOIN plans p ON us.plan_id = p.id
+                        WHERE pl.payment_id = %s AND pl.user_id = %s
+                    """, (order_id, user["id"]))
+                    
+                    payment_info = cursor.fetchone()
+                    
+                    if not payment_info:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail="결제 정보를 찾을 수 없습니다."
+                        )
+                    
+                    return {
+                        "success": True,
+                        "status": payment_info[0],
+                        "processed_at": payment_info[1].isoformat() if payment_info[1] else None,
+                        "amount": payment_info[2],
+                        "plan_name": payment_info[3]
+                    }
+                    
+                except Exception as e:
+                    print(f"❌ DB 조회 오류: {e}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"결제 상태 조회 중 오류가 발생했습니다: {str(e)}"
+                    )
             
     except HTTPException:
         raise
