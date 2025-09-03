@@ -183,7 +183,7 @@ async def complete_payment(
                     
                     # 중복 결제 처리 방지
                     cursor.execute("""
-                        SELECT id FROM payments WHERE payment_id = %s AND user_id = %s
+                        SELECT id FROM payment_logs WHERE payment_id = %s AND user_id = %s
                     """, (request.paymentKey, user["id"]))
                     
                     existing_payment = cursor.fetchone()
@@ -200,21 +200,19 @@ async def complete_payment(
                         UPDATE users SET plan_id = %s WHERE id = %s
                     """, (request.plan_id, user["id"]))
                     
-                    # subscriptions 테이블에 구독 정보 저장
+                    # user_subscriptions 테이블에 구독 정보 저장
                     cursor.execute("""
-                        INSERT INTO subscriptions (user_id, plan_id, started_at, amount, payment_method, status)
-                        VALUES (%s, %s, NOW(), %s, 'card', 'active')
+                        INSERT INTO user_subscriptions (user_id, plan_id, start_date, status, amount, currency, payment_method)
+                        VALUES (%s, %s, CURDATE(), 'active', %s, 'KRW', 'card')
                     """, (user["id"], request.plan_id, request.amount))
                     
                     subscription_id = cursor.lastrowid
                     
-                    # payments 테이블에 결제 기록 저장
+                    # payment_logs 테이블에 결제 기록 저장
                     cursor.execute("""
-                        INSERT INTO payments (subscription_id, user_id, payment_id, amount, currency, 
-                                           payment_method, payment_gateway, status, processed_at, gateway_response)
-                        VALUES (%s, %s, %s, %s, 'KRW', 'card', 'toss', 'completed', NOW(), %s)
-                    """, (subscription_id, user["id"], request.paymentKey, request.amount, 
-                          '{"status": "completed", "gateway": "toss"}'))
+                        INSERT INTO payment_logs (user_id, plan_id, paid_at, amount, payment_method, payment_id, status)
+                        VALUES (%s, %s, NOW(), %s, 'card', %s, 'completed')
+                    """, (user["id"], request.plan_id, request.amount, request.paymentKey))
                     
                     conn.commit()
                     
@@ -258,11 +256,11 @@ async def get_payment_status(
         
         try:
             cursor.execute("""
-                SELECT p.status, p.processed_at, p.amount, pl.name as plan_name
-                FROM payments p
-                JOIN subscriptions s ON p.subscription_id = s.id
-                JOIN plans pl ON s.plan_id = pl.id
-                WHERE p.payment_id = %s AND p.user_id = %s
+                SELECT pl.status, pl.paid_at, pl.amount, p.name as plan_name
+                FROM payment_logs pl
+                JOIN user_subscriptions us ON pl.user_id = us.user_id
+                JOIN plans p ON us.plan_id = p.id
+                WHERE pl.payment_id = %s AND pl.user_id = %s
             """, (order_id, user["id"]))
             
             payment_info = cursor.fetchone()
