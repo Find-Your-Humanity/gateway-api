@@ -193,13 +193,15 @@ class ApiUsageTracker:
                         except Exception as e:
                             logger.warning(f"user_usage_tracking 테이블 업데이트 실패: {e}")
                     
-                    # 3. user_subscriptions 테이블의 current_usage 업데이트 (안전하게)
+                    # 3. user_subscriptions 테이블의 current_usage 업데이트 (가장 최근 활성 구독만)
                     if user_id:
                         try:
                             cursor.execute("""
                                 UPDATE user_subscriptions 
                                 SET current_usage = COALESCE(current_usage, 0) + 1
                                 WHERE user_id = %s AND status = 'active'
+                                ORDER BY created_at DESC
+                                LIMIT 1
                             """, (user_id,))
                         except Exception as e:
                             logger.warning(f"user_subscriptions 테이블 업데이트 실패: {e}")

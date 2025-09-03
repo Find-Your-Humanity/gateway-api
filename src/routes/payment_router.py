@@ -117,8 +117,8 @@ async def confirm_payment(
                     # user_subscriptions에 신규 구독 저장 (upsert 성격)
                     cursor.execute("""
                         INSERT INTO user_subscriptions
-                        (user_id, plan_id, start_date, end_date, status, amount, currency, payment_method)
-                        VALUES (%s, %s, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 MONTH), 'active', %s, 'KRW', 'card')
+                        (user_id, plan_id, start_date, end_date, status, amount, currency, payment_method, current_usage, last_reset_at)
+                        VALUES (%s, %s, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 MONTH), 'active', %s, 'KRW', 'card', 0, NOW())
                     """, (user["id"], request.plan_id, request.amount))
 
                     subscription_id = cursor.lastrowid
