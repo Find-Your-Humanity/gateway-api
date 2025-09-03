@@ -170,6 +170,10 @@ async def complete_payment(
     user=Depends(get_current_user_from_request)
 ):
     """Toss Payments 승인 완료 후 구독 정보 저장"""
+    if not user:
+        print("❌ 결제 완료 요청: 사용자 인증 실패")
+        raise HTTPException(status_code=401, detail="사용자 인증이 필요합니다.")
+    
     try:
         print(f"🔍 결제 완료 처리 - 사용자 ID: {user['id']}, 플랜 ID: {request.plan_id}")
         

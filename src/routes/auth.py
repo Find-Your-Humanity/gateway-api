@@ -527,7 +527,7 @@ def get_current_user_from_request(request: Request) -> Optional[Dict[str, Any]]:
         return user
         
     except Exception as e:
-        print(f"사용자 인증 오료: {e}")
+        print(f"❌ 사용자 인증 오류: {e}")
         return None
 
 
@@ -570,32 +570,6 @@ def get_current_user(request: Request, response: Response):
 
 
 # ==================== 인증 헬퍼 함수 ====================
-
-def get_current_user_from_request(request: Request):
-    """요청에서 현재 사용자 정보를 가져오는 함수"""
-    try:
-        # 쿠키에서 액세스 토큰 가져오기
-        access_token = request.cookies.get("captcha_token")
-        if not access_token:
-            raise HTTPException(status_code=401, detail="액세스 토큰이 없습니다.")
-        
-        # 토큰 검증
-        payload = verify_token(access_token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다.")
-        
-        # 사용자 ID 추출
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="토큰에 사용자 ID가 없습니다.")
-        
-        # 사용자 정보 조회
-        user = get_user_by_id(int(user_id))
-        if not user:
-            raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다.")
-        
-        return user
-    except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"사용자 인증 실패: {e}")
@@ -659,7 +633,7 @@ async def google_callback(code: str, response: Response):
             domain=".realcatcha.com",
             httponly=True,
             secure=True,
-            samesite="none", 
+            samesite="none",
             max_age=60 * 30  # 30분
         )
         
@@ -669,7 +643,7 @@ async def google_callback(code: str, response: Response):
             domain=".realcatcha.com",
             httponly=True,
             secure=True,
-            samesite="none",  
+            samesite="none",
             max_age=60 * 60 * 24 * 14  # 14일
         )
         
