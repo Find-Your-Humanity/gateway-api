@@ -239,6 +239,13 @@ async def complete_payment(
                         print(f"✅ payment_logs 저장 성공: {unique_payment_id}")
                     except Exception as payment_log_error:
                         print(f"❌ payment_logs 저장 실패: {payment_log_error}")
+                        print(f"❌ Error type: {type(payment_log_error).__name__}")
+                        if hasattr(payment_log_error, 'args'):
+                            print(f"❌ Error args: {payment_log_error.args}")
+                        if hasattr(payment_log_error, 'errno'):
+                            print(f"❌ MySQL Error Code: {payment_log_error.errno}")
+                        if hasattr(payment_log_error, 'sqlstate'):
+                            print(f"❌ SQL State: {payment_log_error.sqlstate}")
                         # payment_logs 저장 실패 시에도 구독은 유지
                         print(f"⚠️ payment_logs 저장 실패했지만 구독은 유지됨 (ID: {subscription_id})")
                         # payment_logs 오류는 무시하고 성공 응답
@@ -311,9 +318,18 @@ async def complete_payment(
                 except Exception as e:
                     conn.rollback()
                     print(f"❌ DB 저장 오류: {e}")
+                    print(f"❌ Error type: {type(e).__name__}")
+                    if hasattr(e, 'args'):
+                        print(f"❌ Error args: {e.args}")
+                    if hasattr(e, 'errno'):
+                        print(f"❌ MySQL Error Code: {e.errno}")
+                    if hasattr(e, 'sqlstate'):
+                        print(f"❌ SQL State: {e.sqlstate}")
+                    import traceback
+                    print(f"❌ Stack trace:\n{traceback.format_exc()}")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"구독 정보 저장 중 오류가 발생했습니다: {str(e)}"
+                        detail=f"구독 정보 저장 중 오류가 발생했습니다: {str(e)} (Error Type: {type(e).__name__})"
                     )
             
     except HTTPException:
