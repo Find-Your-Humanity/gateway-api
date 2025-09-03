@@ -219,12 +219,27 @@ async def complete_payment(
                     
                     # 고유한 payment_id 생성
                     unique_payment_id = generate_unique_payment_id()
+                    print(f"🔑 생성된 payment_id: {unique_payment_id}")
                     
                     # payment_logs 테이블에 결제 기록 저장
-                    cursor.execute("""
-                        INSERT INTO payment_logs (user_id, plan_id, paid_at, amount, payment_method, payment_id, status)
-                        VALUES (%s, %s, NOW(), %s, 'card', %s, 'completed')
-                    """, (user["id"], request.plan_id, request.amount, unique_payment_id))
+                    try:
+                        cursor.execute("""
+                            INSERT INTO payment_logs (user_id, plan_id, paid_at, amount, payment_method, payment_id, status)
+                            VALUES (%s, %s, NOW(), %s, 'card', %s, 'completed')
+                        """, (user["id"], request.plan_id, request.amount, unique_payment_id))
+                        print(f"✅ payment_logs 저장 성공: {unique_payment_id}")
+                    except Exception as payment_log_error:
+                        print(f"❌ payment_logs 저장 실패: {payment_log_error}")
+                        # payment_logs 저장 실패 시에도 구독은 유지
+                        print(f"⚠️ payment_logs 저장 실패했지만 구독은 유지됨 (ID: {subscription_id})")
+                        # payment_logs 오류는 무시하고 성공 응답
+                        conn.commit()
+                        return {
+                            "success": True,
+                            "message": f"{plan[1]} 요금제 구독이 완료되었습니다. (결제 로그 저장 실패)",
+                            "payment_id": request.paymentKey,
+                            "plan_id": request.plan_id
+                        }
                     
                     conn.commit()
                     
