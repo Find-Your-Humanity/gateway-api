@@ -199,9 +199,27 @@ def get_dashboard_stats(
                         success = int(r.get("success", 0))
                         failed = int(r.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
-                        # 주간 라벨 생성 (예: 2025-W35)
+                        # 주간 라벨 생성 (예: 9월 1주)
                         yw = r.get("yw", "")
-                        week_label = f"W{str(yw)[-2:]}" if yw else "Unknown"
+                        if yw:
+                            # yw 형식: 202536 -> 2025년 36주차
+                            year = str(yw)[:4]
+                            week_num = int(str(yw)[-2:])
+                            # 주차를 월과 주로 변환
+                            from datetime import datetime, timedelta
+                            # 해당 년도의 첫 번째 월요일 찾기
+                            jan1 = datetime(int(year), 1, 1)
+                            first_monday = jan1 + timedelta(days=(7 - jan1.weekday()) % 7)
+                            # 해당 주차의 시작일 계산
+                            week_start = first_monday + timedelta(weeks=week_num - 1)
+                            month = week_start.month
+                            # 해당 주가 몇 번째 주인지 계산 (월의 첫 번째 월요일 기준)
+                            month_start = datetime(int(year), month, 1)
+                            first_monday_of_month = month_start + timedelta(days=(7 - month_start.weekday()) % 7)
+                            week_in_month = ((week_start - first_monday_of_month).days // 7) + 1
+                            week_label = f"{month}월 {week_in_month}주"
+                        else:
+                            week_label = "Unknown"
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
