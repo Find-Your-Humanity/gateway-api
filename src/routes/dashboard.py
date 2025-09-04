@@ -124,23 +124,44 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
 
 
 @router.get("/dashboard/stats")
-def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "monthly"] = Query("daily"), current_user = Depends(require_auth)):
-    """기간별 캡차 통계 (실데이터)
-    - daily: 최근 7일
-    - weekly: 최근 4주(주간 합계)
-    - monthly: 최근 3개월(월간 합계)
+def get_dashboard_stats(
+    request: Request, 
+    period: Literal["daily", "weekly", "monthly"] = Query("daily"),
+    api_type: Literal["all", "handwriting", "abstract", "imagecaptcha"] = Query("all"),
+    current_user = Depends(require_auth)
+):
+    """기간별 캡차 통계 (API별 분리)
+    - period: daily(7일), weekly(4주), monthly(3개월)
+    - api_type: all(전체), handwriting(필기), abstract(추상), imagecaptcha(이미지)
     응답 항목은 프런트의 CaptchaStats 포맷을 따름.
     """
     try:
         results = []
+        
+        # API 타입별 필터링 조건 설정
+        api_filter = ""
+        if api_type == "handwriting":
+            api_filter = "AND path = '/api/handwriting-verify'"
+        elif api_type == "abstract":
+            api_filter = "AND path = '/api/abstract-verify'"
+        elif api_type == "imagecaptcha":
+            api_filter = "AND path = '/api/imagecaptcha-verify'"
+        else:  # all
+            api_filter = "AND path IN ('/api/handwriting-verify', '/api/abstract-verify', '/api/imagecaptcha-verify')"
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 if period == "daily":
                     cursor.execute(
-                        """
-                        SELECT date, total_requests AS total, success_count AS success, failure_count AS failed
-                        FROM request_statistics
-                        WHERE date >= CURDATE() - INTERVAL 6 DAY
+                        f"""
+                        SELECT DATE(request_time) as date, 
+                               COUNT(*) as total,
+                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as success,
+                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed
+                        FROM request_logs
+                        WHERE request_time >= CURDATE() - INTERVAL 6 DAY
+                        {api_filter}
+                        GROUP BY DATE(request_time)
                         ORDER BY date ASC
                         """
                     )
@@ -160,14 +181,15 @@ def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "mo
                         })
                 elif period == "weekly":
                     cursor.execute(
-                        """
-                        SELECT YEARWEEK(date, 3) AS yw,
-                               SUM(total_requests) AS total,
-                               SUM(success_count) AS success,
-                               SUM(failure_count) AS failed
-                        FROM request_statistics
-                        WHERE date >= CURDATE() - INTERVAL 28 DAY
-                        GROUP BY yw
+                        f"""
+                        SELECT YEARWEEK(request_time, 3) AS yw,
+                               COUNT(*) AS total,
+                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success,
+                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs
+                        WHERE request_time >= CURDATE() - INTERVAL 28 DAY
+                        {api_filter}
+                        GROUP BY YEARWEEK(request_time, 3)
                         ORDER BY yw ASC
                         """
                     )
@@ -190,14 +212,15 @@ def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "mo
                         })
                 else:  # monthly
                     cursor.execute(
-                        """
-                        SELECT DATE_FORMAT(date, '%Y-%m') AS ym,
-                               SUM(total_requests) AS total,
-                               SUM(success_count) AS success,
-                               SUM(failure_count) AS failed
-                        FROM request_statistics
-                        WHERE date >= (CURDATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(CURDATE())-1 DAY
-                        GROUP BY ym
+                        f"""
+                        SELECT DATE_FORMAT(request_time, '%Y-%m') AS ym,
+                               COUNT(*) AS total,
+                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success,
+                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs
+                        WHERE request_time >= (CURDATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(CURDATE())-1 DAY
+                        {api_filter}
+                        GROUP BY DATE_FORMAT(request_time, '%Y-%m')
                         ORDER BY ym ASC
                         """
                     )

@@ -22,11 +22,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         "/status"            # 상태
     ]
     
-    # 로깅할 캡차 검증 API 경로들 (이 4개만 로깅)
+    # 로깅할 캡차 검증 API 경로들 (실제 captcha-api 엔드포인트)
     CAPTCHA_VERIFICATION_PATHS = [
-        "/api/verify-captcha",           # 캡차 검증
-        "/api/verify-handwriting",       # 필기 캡차 검증
-        "/api/imagecaptcha-challenge",   # 이미지 캡차 챌린지
+        "/api/handwriting-verify",       # 필기 캡차 검증
+        "/api/abstract-verify",          # 추상 캡차 검증
         "/api/imagecaptcha-verify"       # 이미지 캡차 검증
     ]
     
