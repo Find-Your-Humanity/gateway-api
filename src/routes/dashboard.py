@@ -177,12 +177,16 @@ def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "mo
                         success = int(r.get("success", 0))
                         failed = int(r.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
+                        # 주간 라벨 생성 (예: 2025-W35)
+                        yw = r.get("yw", "")
+                        week_label = f"W{str(yw)[-2:]}" if yw else "Unknown"
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
+                            "date": week_label,
                         })
                 else:  # monthly
                     cursor.execute(
@@ -203,12 +207,16 @@ def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "mo
                         success = int(r.get("success", 0))
                         failed = int(r.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
+                        # 월간 라벨 생성 (예: 2025-08)
+                        ym = r.get("ym", "")
+                        month_label = ym.replace("-", "/") if ym else "Unknown"
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
+                            "date": month_label,
                         })
 
         return {"success": True, "data": results}
