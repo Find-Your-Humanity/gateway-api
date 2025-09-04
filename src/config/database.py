@@ -21,6 +21,13 @@ def get_db_connection():
     connection = None
     try:
         connection = pymysql.connect(**DB_CONFIG)
+        # 세션 타임존을 KST로 고정하여 NOW(), CURRENT_TIMESTAMP 등이 KST로 동작하도록 한다
+        try:
+            with connection.cursor() as _c:
+                _c.execute("SET time_zone = '+09:00'")
+        except Exception as _tz_err:
+            # Named zone 미지원/권한 문제 등은 앱 동작에 치명적이지 않으므로 경고만 출력
+            print(f"[warn] 세션 time_zone 설정 실패: {_tz_err}")
         yield connection
     except Exception as e:
         print(f"데이터베이스 연결 오류: {e}")
