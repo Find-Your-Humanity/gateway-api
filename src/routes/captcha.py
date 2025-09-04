@@ -149,21 +149,21 @@ async def log_api_usage(api_key_info: Dict[str, Any], request_data: Dict[str, An
                     WHERE id = %s
                 """, (api_key_info['api_key_id'],))
                 
-                # 요청 로그 기록
-                cursor.execute("""
-                    INSERT INTO request_logs (api_key_id, user_id, endpoint, method, 
-                                            request_data, response_status, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                """, (
-                    api_key_info['api_key_id'],
-                    api_key_info['user_id'],
-                    '/api/next-captcha',
-                    'POST',
-                    json.dumps(request_data),
-                    200
-                ))
+                # 요청 로그 기록 제거 (미들웨어에서 처리)
+                # cursor.execute("""
+                #     INSERT INTO request_logs (api_key_id, user_id, endpoint, method, 
+                #                             request_data, response_status, created_at)
+                #     VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                # """, (
+                #     api_key_info['api_key_id'],
+                #     api_key_info['user_id'],
+                #     '/api/next-captcha',
+                #     'POST',
+                #     json.dumps(request_data),
+                #     200
+                # ))
                 
-                conn.commit()
+                # conn.commit()
                 
                 # 캡차 사용량 증가 (user_usage_tracking 테이블)
                 await usage_service.increment_captcha_usage(api_key_info['user_id'])

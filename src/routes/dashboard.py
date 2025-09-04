@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from typing import Literal, Optional, List
 from datetime import date, timedelta, datetime
-from src.config.database import get_db_connection
+from src.config.database import get_db_connection, cleanup_duplicate_request_statistics
 from src.routes.auth import get_current_user_from_request
 from src.middleware.usage_tracking import ApiUsageTracker
 
@@ -124,23 +124,44 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
 
 
 @router.get("/dashboard/stats")
-def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "monthly"] = Query("daily"), current_user = Depends(require_auth)):
-    """기간별 캡차 통계 (실데이터)
-    - daily: 최근 7일
-    - weekly: 최근 4주(주간 합계)
-    - monthly: 최근 3개월(월간 합계)
+def get_dashboard_stats(
+    request: Request, 
+    period: Literal["daily", "weekly", "monthly"] = Query("daily"),
+    api_type: Literal["all", "handwriting", "abstract", "imagecaptcha"] = Query("all"),
+    current_user = Depends(require_auth)
+):
+    """기간별 캡차 통계 (API별 분리)
+    - period: daily(7일), weekly(4주), monthly(3개월)
+    - api_type: all(전체), handwriting(필기), abstract(추상), imagecaptcha(이미지)
     응답 항목은 프런트의 CaptchaStats 포맷을 따름.
     """
     try:
         results = []
+        
+        # API 타입별 필터링 조건 설정
+        api_filter = ""
+        if api_type == "handwriting":
+            api_filter = "AND path = '/api/handwriting-verify'"
+        elif api_type == "abstract":
+            api_filter = "AND path = '/api/abstract-verify'"
+        elif api_type == "imagecaptcha":
+            api_filter = "AND path = '/api/imagecaptcha-verify'"
+        else:  # all
+            api_filter = "AND path IN ('/api/handwriting-verify', '/api/abstract-verify', '/api/imagecaptcha-verify')"
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 if period == "daily":
                     cursor.execute(
-                        """
-                        SELECT date, total_requests AS total, success_count AS success, failure_count AS failed
-                        FROM request_statistics
-                        WHERE date >= CURDATE() - INTERVAL 6 DAY
+                        f"""
+                        SELECT DATE(CONVERT_TZ(request_time, '+00:00', '+09:00')) as date, 
+                               COUNT(*) as total,
+                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as success,
+                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed
+                        FROM request_logs
+                        WHERE request_time >= UTC_DATE() - INTERVAL 6 DAY
+                        {api_filter}
+                        GROUP BY DATE(CONVERT_TZ(request_time, '+00:00', '+09:00'))
                         ORDER BY date ASC
                         """
                     )
@@ -156,17 +177,19 @@ def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "mo
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
+                            "date": r.get("date").strftime("%Y-%m-%d") if r.get("date") else None,
                         })
                 elif period == "weekly":
                     cursor.execute(
-                        """
-                        SELECT YEARWEEK(date, 3) AS yw,
-                               SUM(total_requests) AS total,
-                               SUM(success_count) AS success,
-                               SUM(failure_count) AS failed
-                        FROM request_statistics
-                        WHERE date >= CURDATE() - INTERVAL 28 DAY
-                        GROUP BY yw
+                        f"""
+                        SELECT YEARWEEK(CONVERT_TZ(request_time, '+00:00', '+09:00'), 3) AS yw,
+                               COUNT(*) AS total,
+                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success,
+                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs
+                        WHERE request_time >= UTC_DATE() - INTERVAL 28 DAY
+                        {api_filter}
+                        GROUP BY YEARWEEK(CONVERT_TZ(request_time, '+00:00', '+09:00'), 3)
                         ORDER BY yw ASC
                         """
                     )
@@ -176,23 +199,43 @@ def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "mo
                         success = int(r.get("success", 0))
                         failed = int(r.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
+                        # 주간 라벨 생성 (예: 9월 1주)
+                        yw = r.get("yw", "")
+                        if yw:
+                            # yw 형식: 202536 -> 2025년 36주차 (ISO 주차)
+                            year = int(str(yw)[:4])
+                            week_num = int(str(yw)[-2:])
+                            from datetime import date, timedelta
+                            # ISO 주차의 월요일 날짜 계산
+                            week_start = date.fromisocalendar(year, week_num, 1)
+                            month = week_start.month
+                            # 월 기준 몇 번째 주인지 계산 (해당 월의 첫 날부터 카운트)
+                            first_day_of_month = date(year, month, 1)
+                            # first_day_of_month가 속한 주의 월요일
+                            first_week_monday = first_day_of_month - timedelta(days=(first_day_of_month.isoweekday() - 1))
+                            week_in_month = ((week_start - first_week_monday).days // 7) + 1
+                            week_label = f"{month}월 {week_in_month}주"
+                        else:
+                            week_label = "Unknown"
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
+                            "date": week_label,
                         })
                 else:  # monthly
                     cursor.execute(
-                        """
-                        SELECT DATE_FORMAT(date, '%Y-%m') AS ym,
-                               SUM(total_requests) AS total,
-                               SUM(success_count) AS success,
-                               SUM(failure_count) AS failed
-                        FROM request_statistics
-                        WHERE date >= (CURDATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(CURDATE())-1 DAY
-                        GROUP BY ym
+                        f"""
+                        SELECT DATE_FORMAT(CONVERT_TZ(request_time, '+00:00', '+09:00'), '%Y-%m') AS ym,
+                               COUNT(*) AS total,
+                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success,
+                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs
+                        WHERE request_time >= (UTC_DATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(UTC_DATE())-1 DAY
+                        {api_filter}
+                        GROUP BY DATE_FORMAT(CONVERT_TZ(request_time, '+00:00', '+09:00'), '%Y-%m')
                         ORDER BY ym ASC
                         """
                     )
@@ -202,12 +245,16 @@ def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "mo
                         success = int(r.get("success", 0))
                         failed = int(r.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
+                        # 월간 라벨 생성 (예: 2025-08)
+                        ym = r.get("ym", "")
+                        month_label = ym.replace("-", "/") if ym else "Unknown"
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
+                            "date": month_label,
                         })
 
         return {"success": True, "data": results}
@@ -512,3 +559,19 @@ def get_api_key_usage_stats(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"API 키 사용량 조회 실패: {e}")
+
+
+@router.post("/dashboard/cleanup-duplicates")
+def cleanup_duplicate_statistics(request: Request, current_user = Depends(require_auth)):
+    """request_statistics 테이블의 중복 데이터를 수동으로 정리"""
+    try:
+        deleted_count = cleanup_duplicate_request_statistics()
+        
+        return {
+            "success": True,
+            "message": f"중복 데이터 정리 완료: {deleted_count}건 삭제",
+            "deletedCount": deleted_count
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"중복 데이터 정리 실패: {e}")

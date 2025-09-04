@@ -21,6 +21,13 @@ def get_db_connection():
     connection = None
     try:
         connection = pymysql.connect(**DB_CONFIG)
+        # 세션 타임존을 KST로 고정하여 NOW(), CURRENT_TIMESTAMP 등이 KST로 동작하도록 한다
+        try:
+            with connection.cursor() as _c:
+                _c.execute("SET time_zone = '+09:00'")
+        except Exception as _tz_err:
+            # Named zone 미지원/권한 문제 등은 앱 동작에 치명적이지 않으므로 경고만 출력
+            print(f"[warn] 세션 time_zone 설정 실패: {_tz_err}")
         yield connection
     except Exception as e:
         print(f"데이터베이스 연결 오류: {e}")
@@ -371,27 +378,77 @@ def cleanup_password_reset_codes() -> int:
             return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
 
 
+def cleanup_duplicate_request_statistics() -> int:
+    """request_statistics 테이블의 중복 데이터를 정리한다.
+    같은 날짜의 여러 레코드를 하나로 합치고, 가장 큰 ID를 제외한 나머지를 삭제한다.
+    반환: 삭제된 행 수
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 같은 날짜의 중복 레코드 중 가장 큰 ID를 제외한 나머지 삭제
+                cursor.execute("""
+                    DELETE rs1 FROM request_statistics rs1
+                    INNER JOIN request_statistics rs2 
+                    WHERE rs1.date = rs2.date 
+                    AND rs1.id < rs2.id
+                """)
+                deleted_count = cursor.rowcount
+                
+                # 각 날짜별로 데이터를 합산하여 업데이트
+                cursor.execute("""
+                    UPDATE request_statistics rs
+                    SET 
+                        total_requests = (
+                            SELECT SUM(total_requests) 
+                            FROM request_statistics rs2 
+                            WHERE rs2.date = rs.date
+                        ),
+                        success_count = (
+                            SELECT SUM(success_count) 
+                            FROM request_statistics rs2 
+                            WHERE rs2.date = rs.date
+                        ),
+                        failure_count = (
+                            SELECT SUM(failure_count) 
+                            FROM request_statistics rs2 
+                            WHERE rs2.date = rs.date
+                        )
+                    WHERE rs.id IN (
+                        SELECT MAX(id) 
+                        FROM request_statistics 
+                        GROUP BY date
+                    )
+                """)
+                
+                return deleted_count
+    except Exception as e:
+        print(f"중복 데이터 정리 실패: {e}")
+        return 0
+
+
 def aggregate_request_statistics(days: int = 30) -> int:
-    """최근 N일간 request_logs를 집계하여 request_statistics에 업서트한다.
+    """최근 N일간 request_logs를 집계하여 request_statistics에 누적 업데이트한다.
+    날짜별로 데이터를 누적하고, 자정 이후 자동으로 다음 날짜로 변경된다.
     반환: 영향받은(업서트된) 행 수(참고용)
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                # 현재 날짜 기준으로 집계 (자정 이후 자동으로 다음 날짜로 변경)
                 cursor.execute(
                     f"""
                     INSERT INTO request_statistics (date, total_requests, success_count, failure_count)
-                    SELECT DATE(request_time) AS date,
+                    SELECT CURDATE() AS date,
                            COUNT(*) AS total_requests,
                            SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success_count,
                            SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failure_count
                     FROM request_logs
-                    WHERE request_time >= CURDATE() - INTERVAL {days} DAY
-                    GROUP BY DATE(request_time)
+                    WHERE DATE(request_time) = CURDATE()
                     ON DUPLICATE KEY UPDATE
-                      total_requests=VALUES(total_requests),
-                      success_count=VALUES(success_count),
-                      failure_count=VALUES(failure_count)
+                      total_requests = total_requests + VALUES(total_requests),
+                      success_count = success_count + VALUES(success_count),
+                      failure_count = failure_count + VALUES(failure_count)
                     """
                 )
                 return cursor.rowcount if hasattr(cursor, 'rowcount') else 0
