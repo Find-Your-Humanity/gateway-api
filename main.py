@@ -14,11 +14,13 @@ from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.usage_tracking import UsageTrackingMiddleware
 from src.services.usage_service import usage_service
 import asyncio
+from datetime import datetime
 from src.config.database import (
     init_database,
     test_connection,
     cleanup_password_reset_tokens,
     cleanup_password_reset_codes,
+    cleanup_duplicate_request_statistics,
     aggregate_request_statistics,
     aggregate_error_stats_daily,
     aggregate_endpoint_usage_daily,
@@ -133,6 +135,12 @@ async def startup_event():
                     deleted_codes = cleanup_password_reset_codes()
                     if deleted_codes:
                         print(f"(주기) 만료/사용 코드 정리: {deleted_codes}건 삭제")
+                    # 중복 데이터 정리 (매일 한 번만 실행)
+                    if datetime.now().hour == 0 and datetime.now().minute < 5:  # 자정 이후 5분 내에만 실행
+                        cleaned = cleanup_duplicate_request_statistics()
+                        if cleaned > 0:
+                            print(f"🧹 중복 데이터 정리: {cleaned}건 삭제")
+                    
                     # 집계 작업 수행
                     a = aggregate_request_statistics(30)
                     e = aggregate_error_stats_daily(30)

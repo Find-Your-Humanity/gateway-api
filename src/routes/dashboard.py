@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from typing import Literal, Optional, List
 from datetime import date, timedelta, datetime
-from src.config.database import get_db_connection
+from src.config.database import get_db_connection, cleanup_duplicate_request_statistics
 from src.routes.auth import get_current_user_from_request
 from src.middleware.usage_tracking import ApiUsageTracker
 
@@ -156,6 +156,7 @@ def get_dashboard_stats(request: Request, period: Literal["daily", "weekly", "mo
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
+                            "date": r.get("date").strftime("%Y-%m-%d") if r.get("date") else None,
                         })
                 elif period == "weekly":
                     cursor.execute(
@@ -512,3 +513,19 @@ def get_api_key_usage_stats(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"API 키 사용량 조회 실패: {e}")
+
+
+@router.post("/dashboard/cleanup-duplicates")
+def cleanup_duplicate_statistics(request: Request, current_user = Depends(require_auth)):
+    """request_statistics 테이블의 중복 데이터를 수동으로 정리"""
+    try:
+        deleted_count = cleanup_duplicate_request_statistics()
+        
+        return {
+            "success": True,
+            "message": f"중복 데이터 정리 완료: {deleted_count}건 삭제",
+            "deletedCount": deleted_count
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"중복 데이터 정리 실패: {e}")
