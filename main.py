@@ -53,7 +53,7 @@ app.add_middleware(
         "http://127.0.0.1",
         "http://127.0.0.1:8080",
         "http://127.0.0.1:8081",  # 테스트용 추가
-        "https://novelike-the-draw.static.hf.space"  # 임시 추가
+        "https://novelike-the-draw.static.hf.space",  # 임시 추가
         # Allow all localhost ports for development
         "http://localhost:5173",
         "http://127.0.0.1:5173"
