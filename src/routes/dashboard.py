@@ -202,21 +202,18 @@ def get_dashboard_stats(
                         # 주간 라벨 생성 (예: 9월 1주)
                         yw = r.get("yw", "")
                         if yw:
-                            # yw 형식: 202536 -> 2025년 36주차
-                            year = str(yw)[:4]
+                            # yw 형식: 202536 -> 2025년 36주차 (ISO 주차)
+                            year = int(str(yw)[:4])
                             week_num = int(str(yw)[-2:])
-                            # 주차를 월과 주로 변환
-                            from datetime import datetime, timedelta
-                            # 해당 년도의 첫 번째 월요일 찾기
-                            jan1 = datetime(int(year), 1, 1)
-                            first_monday = jan1 + timedelta(days=(7 - jan1.weekday()) % 7)
-                            # 해당 주차의 시작일 계산
-                            week_start = first_monday + timedelta(weeks=week_num - 1)
+                            from datetime import date, timedelta
+                            # ISO 주차의 월요일 날짜 계산
+                            week_start = date.fromisocalendar(year, week_num, 1)
                             month = week_start.month
-                            # 해당 주가 몇 번째 주인지 계산 (월의 첫 번째 월요일 기준)
-                            month_start = datetime(int(year), month, 1)
-                            first_monday_of_month = month_start + timedelta(days=(7 - month_start.weekday()) % 7)
-                            week_in_month = ((week_start - first_monday_of_month).days // 7) + 1
+                            # 월 기준 몇 번째 주인지 계산 (해당 월의 첫 날부터 카운트)
+                            first_day_of_month = date(year, month, 1)
+                            # first_day_of_month가 속한 주의 월요일
+                            first_week_monday = first_day_of_month - timedelta(days=(first_day_of_month.isoweekday() - 1))
+                            week_in_month = ((week_start - first_week_monday).days // 7) + 1
                             week_label = f"{month}월 {week_in_month}주"
                         else:
                             week_label = "Unknown"
