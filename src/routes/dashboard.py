@@ -154,14 +154,14 @@ def get_dashboard_stats(
                 if period == "daily":
                     cursor.execute(
                         f"""
-                        SELECT DATE(request_time) as date, 
+                        SELECT DATE(CONVERT_TZ(request_time, '+00:00', '+09:00')) as date, 
                                COUNT(*) as total,
                                SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as success,
                                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed
                         FROM request_logs
-                        WHERE request_time >= CURDATE() - INTERVAL 6 DAY
+                        WHERE request_time >= UTC_DATE() - INTERVAL 6 DAY
                         {api_filter}
-                        GROUP BY DATE(request_time)
+                        GROUP BY DATE(CONVERT_TZ(request_time, '+00:00', '+09:00'))
                         ORDER BY date ASC
                         """
                     )
@@ -182,14 +182,14 @@ def get_dashboard_stats(
                 elif period == "weekly":
                     cursor.execute(
                         f"""
-                        SELECT YEARWEEK(request_time, 3) AS yw,
+                        SELECT YEARWEEK(CONVERT_TZ(request_time, '+00:00', '+09:00'), 3) AS yw,
                                COUNT(*) AS total,
                                SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success,
                                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failed
                         FROM request_logs
-                        WHERE request_time >= CURDATE() - INTERVAL 28 DAY
+                        WHERE request_time >= UTC_DATE() - INTERVAL 28 DAY
                         {api_filter}
-                        GROUP BY YEARWEEK(request_time, 3)
+                        GROUP BY YEARWEEK(CONVERT_TZ(request_time, '+00:00', '+09:00'), 3)
                         ORDER BY yw ASC
                         """
                     )
@@ -228,14 +228,14 @@ def get_dashboard_stats(
                 else:  # monthly
                     cursor.execute(
                         f"""
-                        SELECT DATE_FORMAT(request_time, '%Y-%m') AS ym,
+                        SELECT DATE_FORMAT(CONVERT_TZ(request_time, '+00:00', '+09:00'), '%Y-%m') AS ym,
                                COUNT(*) AS total,
                                SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success,
                                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failed
                         FROM request_logs
-                        WHERE request_time >= (CURDATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(CURDATE())-1 DAY
+                        WHERE request_time >= (UTC_DATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(UTC_DATE())-1 DAY
                         {api_filter}
-                        GROUP BY DATE_FORMAT(request_time, '%Y-%m')
+                        GROUP BY DATE_FORMAT(CONVERT_TZ(request_time, '+00:00', '+09:00'), '%Y-%m')
                         ORDER BY ym ASC
                         """
                     )
