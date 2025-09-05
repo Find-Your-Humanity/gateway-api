@@ -128,19 +128,23 @@ def ensure_daily_stats_data():
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 최근 7일간의 모든 날짜에 대해 데이터가 있는지 확인
+                # KST 기준으로 최근 7일간의 모든 날짜에 대해 데이터가 있는지 확인
                 cursor.execute("""
                     SELECT DISTINCT date FROM daily_api_stats 
-                    WHERE date >= CURDATE() - INTERVAL 6 DAY
+                    WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 6 DAY
                     ORDER BY date
                 """)
                 existing_dates = [row['date'] for row in cursor.fetchall()]
                 
-                # 누락된 날짜 찾기
+                # 누락된 날짜 찾기 (KST 기준)
                 from datetime import date, timedelta
+                # KST 기준 오늘 날짜 계산
+                cursor.execute("SELECT DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) as kst_today")
+                kst_today = cursor.fetchone()['kst_today']
+                
                 all_dates = []
                 for i in range(7):
-                    check_date = date.today() - timedelta(days=i)
+                    check_date = kst_today - timedelta(days=i)
                     all_dates.append(check_date)
                 
                 missing_dates = [d for d in all_dates if d not in existing_dates]
@@ -192,7 +196,7 @@ def get_dashboard_stats(
                                    SUM(success_requests) as success,
                                    SUM(failed_requests) as failed
                             FROM daily_api_stats
-                            WHERE date >= CURDATE() - INTERVAL 6 DAY
+                            WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 6 DAY
                             GROUP BY date
                             ORDER BY date ASC
                             """
@@ -212,7 +216,7 @@ def get_dashboard_stats(
                                    success_requests as success,
                                    failed_requests as failed
                             FROM daily_api_stats
-                            WHERE date >= CURDATE() - INTERVAL 6 DAY
+                            WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 6 DAY
                             AND api_type = %s
                             ORDER BY date ASC
                             """,
@@ -242,7 +246,7 @@ def get_dashboard_stats(
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
-                            WHERE date >= CURDATE() - INTERVAL 28 DAY
+                            WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 28 DAY
                             GROUP BY YEARWEEK(date, 3)
                             ORDER BY yw ASC
                             """
@@ -261,7 +265,7 @@ def get_dashboard_stats(
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
-                            WHERE date >= CURDATE() - INTERVAL 28 DAY
+                            WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 28 DAY
                             AND api_type = %s
                             GROUP BY YEARWEEK(date, 3)
                             ORDER BY yw ASC
@@ -310,7 +314,7 @@ def get_dashboard_stats(
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
-                            WHERE date >= (CURDATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(CURDATE())-1 DAY
+                            WHERE date >= (DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')))-1 DAY
                             GROUP BY DATE_FORMAT(date, '%Y-%m')
                             ORDER BY ym ASC
                             """
@@ -329,7 +333,7 @@ def get_dashboard_stats(
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
-                            WHERE date >= (CURDATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(CURDATE())-1 DAY
+                            WHERE date >= (DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')))-1 DAY
                             AND api_type = %s
                             GROUP BY DATE_FORMAT(date, '%Y-%m')
                             ORDER BY ym ASC
