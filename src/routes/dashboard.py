@@ -126,22 +126,23 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
 def ensure_daily_stats_data():
     """daily_api_stats 테이블에 누락된 날짜 데이터를 0으로 채워넣기"""
     try:
+        from datetime import date, timedelta, timezone, datetime
+        
+        # Python에서 KST 기준 오늘 날짜 계산
+        kst_tz = timezone(timedelta(hours=9))
+        kst_today = datetime.now(kst_tz).date()
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # KST 기준으로 최근 7일간의 모든 날짜에 대해 데이터가 있는지 확인
+                # 최근 7일간의 모든 날짜에 대해 데이터가 있는지 확인
                 cursor.execute("""
                     SELECT DISTINCT date FROM daily_api_stats 
-                    WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 6 DAY
+                    WHERE date >= %s
                     ORDER BY date
-                """)
+                """, (kst_today - timedelta(days=6),))
                 existing_dates = [row['date'] for row in cursor.fetchall()]
                 
                 # 누락된 날짜 찾기 (KST 기준)
-                from datetime import date, timedelta
-                # KST 기준 오늘 날짜 계산
-                cursor.execute("SELECT DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) as kst_today")
-                kst_today = cursor.fetchone()['kst_today']
-                
                 all_dates = []
                 for i in range(7):
                     check_date = kst_today - timedelta(days=i)
@@ -187,6 +188,12 @@ def get_dashboard_stats(
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 if period == "daily":
+                    # Python에서 KST 기준 날짜 계산
+                    from datetime import date, timedelta, timezone, datetime
+                    kst_tz = timezone(timedelta(hours=9))
+                    kst_today = datetime.now(kst_tz).date()
+                    start_date = kst_today - timedelta(days=6)
+                    
                     # daily_api_stats 테이블을 메인 데이터 소스로 사용
                     if api_type == "all":
                         cursor.execute(
@@ -196,10 +203,11 @@ def get_dashboard_stats(
                                    SUM(success_requests) as success,
                                    SUM(failed_requests) as failed
                             FROM daily_api_stats
-                            WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 6 DAY
+                            WHERE date >= %s
                             GROUP BY date
                             ORDER BY date ASC
-                            """
+                            """,
+                            (start_date,)
                         )
                     else:
                         # API 타입별 필터링
@@ -216,11 +224,11 @@ def get_dashboard_stats(
                                    success_requests as success,
                                    failed_requests as failed
                             FROM daily_api_stats
-                            WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 6 DAY
+                            WHERE date >= %s
                             AND api_type = %s
                             ORDER BY date ASC
                             """,
-                            (target_api_type,)
+                            (start_date, target_api_type)
                         )
                     rows = cursor.fetchall() or []
                     for r in rows:
@@ -237,6 +245,12 @@ def get_dashboard_stats(
                             "date": r.get("date").strftime("%Y-%m-%d") if r.get("date") else None,
                         })
                 elif period == "weekly":
+                    # Python에서 KST 기준 날짜 계산
+                    from datetime import date, timedelta, timezone, datetime
+                    kst_tz = timezone(timedelta(hours=9))
+                    kst_today = datetime.now(kst_tz).date()
+                    start_date = kst_today - timedelta(days=28)
+                    
                     # daily_api_stats 테이블을 사용하여 주간 통계 계산
                     if api_type == "all":
                         cursor.execute(
@@ -246,10 +260,11 @@ def get_dashboard_stats(
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
-                            WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 28 DAY
+                            WHERE date >= %s
                             GROUP BY YEARWEEK(date, 3)
                             ORDER BY yw ASC
-                            """
+                            """,
+                            (start_date,)
                         )
                     else:
                         api_type_mapping = {
@@ -265,12 +280,12 @@ def get_dashboard_stats(
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
-                            WHERE date >= DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 28 DAY
+                            WHERE date >= %s
                             AND api_type = %s
                             GROUP BY YEARWEEK(date, 3)
                             ORDER BY yw ASC
                             """,
-                            (target_api_type,)
+                            (start_date, target_api_type)
                         )
                     rows = cursor.fetchall() or []
                     for r in rows:
@@ -305,6 +320,13 @@ def get_dashboard_stats(
                             "date": week_label,
                         })
                 else:  # monthly
+                    # Python에서 KST 기준 날짜 계산
+                    from datetime import date, timedelta, timezone, datetime
+                    kst_tz = timezone(timedelta(hours=9))
+                    kst_today = datetime.now(kst_tz).date()
+                    # 3개월 전 1일부터
+                    start_date = kst_today.replace(day=1) - timedelta(days=60)
+                    
                     # daily_api_stats 테이블을 사용하여 월간 통계 계산
                     if api_type == "all":
                         cursor.execute(
@@ -314,10 +336,11 @@ def get_dashboard_stats(
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
-                            WHERE date >= (DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')))-1 DAY
+                            WHERE date >= %s
                             GROUP BY DATE_FORMAT(date, '%Y-%m')
                             ORDER BY ym ASC
-                            """
+                            """,
+                            (start_date,)
                         )
                     else:
                         api_type_mapping = {
@@ -333,12 +356,12 @@ def get_dashboard_stats(
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
-                            WHERE date >= (DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')) - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(DATE(CONVERT_TZ(NOW(), '+00:00', '+09:00')))-1 DAY
+                            WHERE date >= %s
                             AND api_type = %s
                             GROUP BY DATE_FORMAT(date, '%Y-%m')
                             ORDER BY ym ASC
                             """,
-                            (target_api_type,)
+                            (start_date, target_api_type)
                         )
                     rows = cursor.fetchall() or []
                     for r in rows:
