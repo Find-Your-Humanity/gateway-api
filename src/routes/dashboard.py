@@ -123,6 +123,44 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
         raise HTTPException(status_code=500, detail=f"analytics 수집 실패: {e}")
 
 
+def ensure_daily_stats_data():
+    """daily_api_stats 테이블에 누락된 날짜 데이터를 0으로 채워넣기"""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 최근 7일간의 모든 날짜에 대해 데이터가 있는지 확인
+                cursor.execute("""
+                    SELECT DISTINCT date FROM daily_api_stats 
+                    WHERE date >= CURDATE() - INTERVAL 6 DAY
+                    ORDER BY date
+                """)
+                existing_dates = [row['date'] for row in cursor.fetchall()]
+                
+                # 누락된 날짜 찾기
+                from datetime import date, timedelta
+                all_dates = []
+                for i in range(7):
+                    check_date = date.today() - timedelta(days=i)
+                    all_dates.append(check_date)
+                
+                missing_dates = [d for d in all_dates if d not in existing_dates]
+                
+                # 누락된 날짜에 대해 0 데이터 삽입
+                for missing_date in missing_dates:
+                    for api_type in ['handwriting', 'abstract', 'imagecaptcha']:
+                        cursor.execute("""
+                            INSERT IGNORE INTO daily_api_stats 
+                            (date, api_type, total_requests, success_requests, failed_requests, avg_response_time)
+                            VALUES (%s, %s, 0, 0, 0, 0.00)
+                        """, (missing_date, api_type))
+                
+                conn.commit()
+                return len(missing_dates)
+    except Exception as e:
+        print(f"⚠️ daily_api_stats 데이터 보완 실패: {e}")
+        return 0
+
+
 @router.get("/dashboard/stats")
 def get_dashboard_stats(
     request: Request, 
@@ -136,35 +174,50 @@ def get_dashboard_stats(
     응답 항목은 프런트의 CaptchaStats 포맷을 따름.
     """
     try:
-        results = []
+        # daily_api_stats 테이블에 누락된 데이터 보완
+        if period == "daily":
+            ensure_daily_stats_data()
         
-        # API 타입별 필터링 조건 설정
-        api_filter = ""
-        if api_type == "handwriting":
-            api_filter = "AND path = '/api/handwriting-verify'"
-        elif api_type == "abstract":
-            api_filter = "AND path = '/api/abstract-verify'"
-        elif api_type == "imagecaptcha":
-            api_filter = "AND path = '/api/imagecaptcha-verify'"
-        else:  # all
-            api_filter = "AND path IN ('/api/handwriting-verify', '/api/abstract-verify', '/api/imagecaptcha-verify')"
+        results = []
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 if period == "daily":
-                    cursor.execute(
-                        f"""
-                        SELECT DATE(CONVERT_TZ(request_time, '+00:00', '+09:00')) as date, 
-                               COUNT(*) as total,
-                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as success,
-                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed
-                        FROM request_logs
-                        WHERE request_time >= UTC_DATE() - INTERVAL 6 DAY
-                        {api_filter}
-                        GROUP BY DATE(CONVERT_TZ(request_time, '+00:00', '+09:00'))
-                        ORDER BY date ASC
-                        """
-                    )
+                    # daily_api_stats 테이블을 메인 데이터 소스로 사용
+                    if api_type == "all":
+                        cursor.execute(
+                            """
+                            SELECT date, 
+                                   SUM(total_requests) as total,
+                                   SUM(success_requests) as success,
+                                   SUM(failed_requests) as failed
+                            FROM daily_api_stats
+                            WHERE date >= CURDATE() - INTERVAL 6 DAY
+                            GROUP BY date
+                            ORDER BY date ASC
+                            """
+                        )
+                    else:
+                        # API 타입별 필터링
+                        api_type_mapping = {
+                            "handwriting": "handwriting",
+                            "abstract": "abstract", 
+                            "imagecaptcha": "imagecaptcha"
+                        }
+                        target_api_type = api_type_mapping.get(api_type, "handwriting")
+                        cursor.execute(
+                            """
+                            SELECT date, 
+                                   total_requests as total,
+                                   success_requests as success,
+                                   failed_requests as failed
+                            FROM daily_api_stats
+                            WHERE date >= CURDATE() - INTERVAL 6 DAY
+                            AND api_type = %s
+                            ORDER BY date ASC
+                            """,
+                            (target_api_type,)
+                        )
                     rows = cursor.fetchall() or []
                     for r in rows:
                         total = int(r.get("total", 0))
@@ -180,19 +233,41 @@ def get_dashboard_stats(
                             "date": r.get("date").strftime("%Y-%m-%d") if r.get("date") else None,
                         })
                 elif period == "weekly":
-                    cursor.execute(
-                        f"""
-                        SELECT YEARWEEK(CONVERT_TZ(request_time, '+00:00', '+09:00'), 3) AS yw,
-                               COUNT(*) AS total,
-                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success,
-                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failed
-                        FROM request_logs
-                        WHERE request_time >= UTC_DATE() - INTERVAL 28 DAY
-                        {api_filter}
-                        GROUP BY YEARWEEK(CONVERT_TZ(request_time, '+00:00', '+09:00'), 3)
-                        ORDER BY yw ASC
-                        """
-                    )
+                    # daily_api_stats 테이블을 사용하여 주간 통계 계산
+                    if api_type == "all":
+                        cursor.execute(
+                            """
+                            SELECT YEARWEEK(date, 3) AS yw,
+                                   SUM(total_requests) AS total,
+                                   SUM(success_requests) AS success,
+                                   SUM(failed_requests) AS failed
+                            FROM daily_api_stats
+                            WHERE date >= CURDATE() - INTERVAL 28 DAY
+                            GROUP BY YEARWEEK(date, 3)
+                            ORDER BY yw ASC
+                            """
+                        )
+                    else:
+                        api_type_mapping = {
+                            "handwriting": "handwriting",
+                            "abstract": "abstract", 
+                            "imagecaptcha": "imagecaptcha"
+                        }
+                        target_api_type = api_type_mapping.get(api_type, "handwriting")
+                        cursor.execute(
+                            """
+                            SELECT YEARWEEK(date, 3) AS yw,
+                                   SUM(total_requests) AS total,
+                                   SUM(success_requests) AS success,
+                                   SUM(failed_requests) AS failed
+                            FROM daily_api_stats
+                            WHERE date >= CURDATE() - INTERVAL 28 DAY
+                            AND api_type = %s
+                            GROUP BY YEARWEEK(date, 3)
+                            ORDER BY yw ASC
+                            """,
+                            (target_api_type,)
+                        )
                     rows = cursor.fetchall() or []
                     for r in rows:
                         total = int(r.get("total", 0))
@@ -226,19 +301,41 @@ def get_dashboard_stats(
                             "date": week_label,
                         })
                 else:  # monthly
-                    cursor.execute(
-                        f"""
-                        SELECT DATE_FORMAT(CONVERT_TZ(request_time, '+00:00', '+09:00'), '%Y-%m') AS ym,
-                               COUNT(*) AS total,
-                               SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) AS success,
-                               SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS failed
-                        FROM request_logs
-                        WHERE request_time >= (UTC_DATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(UTC_DATE())-1 DAY
-                        {api_filter}
-                        GROUP BY DATE_FORMAT(CONVERT_TZ(request_time, '+00:00', '+09:00'), '%Y-%m')
-                        ORDER BY ym ASC
-                        """
-                    )
+                    # daily_api_stats 테이블을 사용하여 월간 통계 계산
+                    if api_type == "all":
+                        cursor.execute(
+                            """
+                            SELECT DATE_FORMAT(date, '%Y-%m') AS ym,
+                                   SUM(total_requests) AS total,
+                                   SUM(success_requests) AS success,
+                                   SUM(failed_requests) AS failed
+                            FROM daily_api_stats
+                            WHERE date >= (CURDATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(CURDATE())-1 DAY
+                            GROUP BY DATE_FORMAT(date, '%Y-%m')
+                            ORDER BY ym ASC
+                            """
+                        )
+                    else:
+                        api_type_mapping = {
+                            "handwriting": "handwriting",
+                            "abstract": "abstract", 
+                            "imagecaptcha": "imagecaptcha"
+                        }
+                        target_api_type = api_type_mapping.get(api_type, "handwriting")
+                        cursor.execute(
+                            """
+                            SELECT DATE_FORMAT(date, '%Y-%m') AS ym,
+                                   SUM(total_requests) AS total,
+                                   SUM(success_requests) AS success,
+                                   SUM(failed_requests) AS failed
+                            FROM daily_api_stats
+                            WHERE date >= (CURDATE() - INTERVAL 2 MONTH) - INTERVAL DAYOFMONTH(CURDATE())-1 DAY
+                            AND api_type = %s
+                            GROUP BY DATE_FORMAT(date, '%Y-%m')
+                            ORDER BY ym ASC
+                            """,
+                            (target_api_type,)
+                        )
                     rows = cursor.fetchall() or []
                     for r in rows:
                         total = int(r.get("total", 0))
