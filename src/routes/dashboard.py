@@ -331,13 +331,13 @@ def get_dashboard_stats(
                     if api_type == "all":
                         cursor.execute(
                             """
-                            SELECT DATE_FORMAT(date, '%Y-%m') AS ym,
+                            SELECT DATE_FORMAT(date, '%%Y-%%m') AS ym,
                                    SUM(total_requests) AS total,
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
                             WHERE date >= %s
-                            GROUP BY DATE_FORMAT(date, '%Y-%m')
+                            GROUP BY DATE_FORMAT(date, '%%Y-%%m')
                             ORDER BY ym ASC
                             """,
                             (start_date,)
@@ -351,14 +351,14 @@ def get_dashboard_stats(
                         target_api_type = api_type_mapping.get(api_type, "handwriting")
                         cursor.execute(
                             """
-                            SELECT DATE_FORMAT(date, '%Y-%m') AS ym,
+                            SELECT DATE_FORMAT(date, '%%Y-%%m') AS ym,
                                    SUM(total_requests) AS total,
                                    SUM(success_requests) AS success,
                                    SUM(failed_requests) AS failed
                             FROM daily_api_stats
                             WHERE date >= %s
                             AND api_type = %s
-                            GROUP BY DATE_FORMAT(date, '%Y-%m')
+                            GROUP BY DATE_FORMAT(date, '%%Y-%%m')
                             ORDER BY ym ASC
                             """,
                             (start_date, target_api_type)
