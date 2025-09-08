@@ -386,6 +386,149 @@ def get_dashboard_stats(
         raise HTTPException(status_code=500, detail=f"stats 수집 실패: {e}")
 
 
+@router.get("/dashboard/key-stats")
+def get_user_key_stats(
+    request: Request,
+    period: Literal["daily", "weekly", "monthly"] = Query("daily"),
+    api_type: Literal["all", "handwriting", "abstract", "imagecaptcha"] = Query("all"),
+    api_key: Optional[str] = Query(None),
+    current_user = Depends(require_auth),
+):
+    """로그인 사용자의 API 키/타입별 사용량 (누락 구간 0 채움)
+    - 데이터 소스: daily_api_stats_by_key
+    - api_key 미지정 시: 사용자의 모든 키 합계
+    - api_type=all: 타입 합계, 그 외: 지정 타입만
+    """
+    try:
+        results: List[dict] = []
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 기간 경계(KST)
+                from datetime import datetime, timedelta, timezone, date as _date
+                kst = timezone(timedelta(hours=9))
+                today = datetime.now(kst).date()
+
+                def to_rows(rows, label_builder):
+                    out = []
+                    for r in rows:
+                        total = int(r.get("total", 0))
+                        success = int(r.get("success", 0))
+                        failed = int(r.get("failed", 0))
+                        rate = round((success / total) * 100, 1) if total else 0.0
+                        out.append({
+                            "totalRequests": total,
+                            "successfulSolves": success,
+                            "failedAttempts": failed,
+                            "successRate": rate,
+                            "averageResponseTime": 0,
+                            "date": label_builder(r),
+                        })
+                    return out
+
+                # 조건 구성
+                params: list = [current_user["id"]]
+                type_clause = ""
+                if api_type != "all":
+                    type_clause = " AND api_type = %s"
+                    params.append(api_type)
+                key_clause = ""
+                if api_key:
+                    key_clause = " AND api_key = %s"
+                    params.append(api_key)
+
+                if period == "daily":
+                    start_date = today - timedelta(days=6)
+                    # 0 채움용 라벨 테이블 생성
+                    days = [today - timedelta(days=i) for i in range(6, -1, -1)]
+                    cursor.execute(
+                        f"""
+                        SELECT date, 
+                               SUM(total_requests) AS total,
+                               SUM(success_requests) AS success,
+                               SUM(failed_requests) AS failed
+                        FROM daily_api_stats_by_key
+                        WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
+                        GROUP BY date
+                        ORDER BY date ASC
+                        """,
+                        params + [start_date],
+                    )
+                    rows = {r["date"]: r for r in (cursor.fetchall() or [])}
+                    for d in days:
+                        r = rows.get(d)
+                        if r:
+                            total = int(r.get("total", 0))
+                            success = int(r.get("success", 0))
+                            failed = int(r.get("failed", 0))
+                        else:
+                            total = success = failed = 0
+                        rate = round((success / total) * 100, 1) if total else 0.0
+                        results.append({
+                            "totalRequests": total,
+                            "successfulSolves": success,
+                            "failedAttempts": failed,
+                            "successRate": rate,
+                            "averageResponseTime": 0,
+                            "date": d.strftime("%Y-%m-%d"),
+                        })
+
+                elif period == "weekly":
+                    start_date = today - timedelta(days=28)
+                    cursor.execute(
+                        f"""
+                        SELECT YEARWEEK(date, 3) AS yw,
+                               SUM(total_requests) AS total,
+                               SUM(success_requests) AS success,
+                               SUM(failed_requests) AS failed
+                        FROM daily_api_stats_by_key
+                        WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
+                        GROUP BY YEARWEEK(date, 3)
+                        ORDER BY yw ASC
+                        """,
+                        params + [start_date],
+                    )
+                    agg = cursor.fetchall() or []
+                    # 4주 라벨 생성 후 매칭
+                    from datetime import date as _dt
+                    labels = []
+                    for i in range(4, 0, -1):
+                        wk_start = today - timedelta(days=i * 7)
+                        labels.append(wk_start.isocalendar())  # (year, week, weekday)
+                    # 매핑
+                    def week_label(yw):
+                        year = int(str(yw)[:4]); week_num = int(str(yw)[-2:])
+                        ws = _date.fromisocalendar(year, week_num, 1)
+                        month = ws.month
+                        first_day = _date(year, month, 1)
+                        first_week_monday = first_day - timedelta(days=(first_day.isoweekday() - 1))
+                        w_in_m = ((ws - first_week_monday).days // 7) + 1
+                        return f"{month}월 {w_in_m}주"
+                    results = to_rows(agg, lambda r: week_label(r.get("yw")))
+
+                else:  # monthly
+                    # 최근 3개월(해당 월 1일부터)
+                    start_date = today.replace(day=1) - timedelta(days=60)
+                    cursor.execute(
+                        f"""
+                        SELECT DATE_FORMAT(date, '%%Y-%%m') AS ym,
+                               SUM(total_requests) AS total,
+                               SUM(success_requests) AS success,
+                               SUM(failed_requests) AS failed
+                        FROM daily_api_stats_by_key
+                        WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
+                        GROUP BY DATE_FORMAT(date, '%%Y-%%m')
+                        ORDER BY ym ASC
+                        """,
+                        params + [start_date],
+                    )
+                    agg = cursor.fetchall() or []
+                    results = to_rows(agg, lambda r: (r.get("ym") or "").replace("-", "/"))
+
+        return {"success": True, "data": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"key-stats 수집 실패: {e}")
+
+
 @router.get("/dashboard/realtime")
 def get_realtime_metrics(request: Request, current_user = Depends(require_auth)):
     try:
