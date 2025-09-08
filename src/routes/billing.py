@@ -167,10 +167,11 @@ async def get_available_plans():
                 cursor.execute("""
                     SELECT p.id, p.name, p.price, p.monthly_request_limit, p.description, p.features, 
                            p.rate_limit_per_minute, p.is_popular, p.sort_order,
-                           COUNT(us.id) as subscriber_count,
-                           COUNT(CASE WHEN us.status = 'active' THEN us.id END) as active_subscribers
+                           COUNT(DISTINCT us.user_id) as subscriber_count,
+                           COUNT(DISTINCT CASE WHEN us.status = 'active' THEN us.user_id END) as active_subscribers
                     FROM plans p
-                    LEFT JOIN user_subscriptions us ON p.id = us.plan_id
+                    LEFT JOIN user_subscriptions us ON p.id = us.plan_id 
+                        AND us.status IN ('active', 'expired', 'cancelled')
                     WHERE p.is_active = 1 
                     GROUP BY p.id, p.name, p.price, p.monthly_request_limit, p.description, p.features, 
                              p.rate_limit_per_minute, p.is_popular, p.sort_order

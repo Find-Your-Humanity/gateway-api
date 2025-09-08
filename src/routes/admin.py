@@ -449,15 +449,15 @@ def get_plans(
                         p.features, p.rate_limit_per_minute,
                         p.is_active, p.is_popular, p.sort_order,
                         p.created_at, p.updated_at,
-                        /* 현재 활성 사용자 기준 구독자 수 */
+                        /* 현재 활성 사용자 기준 구독자 수 (중복 제거) */
                         (
-                            SELECT COUNT(*) 
+                            SELECT COUNT(DISTINCT u.id) 
                             FROM users u 
                             WHERE u.plan_id = p.id AND (u.is_active = 1 OR u.is_active = TRUE)
                         ) AS subscriber_count,
-                        /* 활성 구독(결제 관점) 수 */
+                        /* 활성 구독(결제 관점) 수 (중복 제거) */
                         (
-                            SELECT COUNT(*) 
+                            SELECT COUNT(DISTINCT us.user_id) 
                             FROM user_subscriptions us 
                             WHERE us.plan_id = p.id AND us.status = 'active'
                         ) AS active_subscribers
