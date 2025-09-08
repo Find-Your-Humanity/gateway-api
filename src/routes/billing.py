@@ -19,6 +19,8 @@ class PlanResponse(BaseModel):
     rate_limit_per_minute: int
     is_popular: bool
     sort_order: int
+    subscriber_count: Optional[int] = 0
+    active_subscribers: Optional[int] = 0
 
 class CurrentPlanResponse(BaseModel):
     plan: PlanResponse
@@ -163,11 +165,16 @@ async def get_available_plans():
                 print(f"🔍 plans 테이블 조회 시작...")
                 
                 cursor.execute("""
-                    SELECT id, name, price, monthly_request_limit, description, features, 
-                           rate_limit_per_minute, is_popular, sort_order
-                    FROM plans 
-                    WHERE is_active = 1 
-                    ORDER BY sort_order, price
+                    SELECT p.id, p.name, p.price, p.monthly_request_limit, p.description, p.features, 
+                           p.rate_limit_per_minute, p.is_popular, p.sort_order,
+                           COUNT(us.id) as subscriber_count,
+                           COUNT(CASE WHEN us.status = 'active' THEN us.id END) as active_subscribers
+                    FROM plans p
+                    LEFT JOIN user_subscriptions us ON p.id = us.plan_id
+                    WHERE p.is_active = 1 
+                    GROUP BY p.id, p.name, p.price, p.monthly_request_limit, p.description, p.features, 
+                             p.rate_limit_per_minute, p.is_popular, p.sort_order
+                    ORDER BY p.sort_order, p.price
                 """)
                 
                 print(f"✅ SQL 쿼리 실행 완료")
@@ -202,7 +209,9 @@ async def get_available_plans():
                             "features": features_dict,
                             "rate_limit_per_minute": row['rate_limit_per_minute'],
                             "is_popular": bool(row['is_popular']),
-                            "sort_order": row['sort_order']
+                            "sort_order": row['sort_order'],
+                            "subscriber_count": row['subscriber_count'] or 0,
+                            "active_subscribers": row['active_subscribers'] or 0
                         }
                         print(f"✅ 플랜 생성 완료: {plan['name']}")
                         plans.append(plan)
