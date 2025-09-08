@@ -440,8 +440,8 @@ def get_user_key_stats(
                     start_date = today - timedelta(days=6)
                     # 0 채움용 라벨 테이블 생성
                     days = [today - timedelta(days=i) for i in range(6, -1, -1)]
-                    cursor.execute(
-                        f"""
+                    # 파라미터 순서: user_id, start_date, (api_type?), (api_key?)
+                    base_sql = f"""
                         SELECT date, 
                                SUM(total_requests) AS total,
                                SUM(success_requests) AS success,
@@ -450,9 +450,14 @@ def get_user_key_stats(
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY date
                         ORDER BY date ASC
-                        """,
-                        params + [start_date],
-                    )
+                        """
+                    # 올바른 파라미터 바인딩
+                    bind_params = [current_user["id"], start_date]
+                    if api_type != "all":
+                        bind_params.append(api_type)
+                    if api_key:
+                        bind_params.append(api_key)
+                    cursor.execute(base_sql, bind_params)
                     rows = {r["date"]: r for r in (cursor.fetchall() or [])}
                     for d in days:
                         r = rows.get(d)
@@ -474,8 +479,7 @@ def get_user_key_stats(
 
                 elif period == "weekly":
                     start_date = today - timedelta(days=28)
-                    cursor.execute(
-                        f"""
+                    base_sql = f"""
                         SELECT YEARWEEK(date, 3) AS yw,
                                SUM(total_requests) AS total,
                                SUM(success_requests) AS success,
@@ -484,9 +488,13 @@ def get_user_key_stats(
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY YEARWEEK(date, 3)
                         ORDER BY yw ASC
-                        """,
-                        params + [start_date],
-                    )
+                        """
+                    bind_params = [current_user["id"], start_date]
+                    if api_type != "all":
+                        bind_params.append(api_type)
+                    if api_key:
+                        bind_params.append(api_key)
+                    cursor.execute(base_sql, bind_params)
                     agg = cursor.fetchall() or []
                     # 4주 라벨 생성 후 매칭
                     from datetime import date as _dt
@@ -508,8 +516,7 @@ def get_user_key_stats(
                 else:  # monthly
                     # 최근 3개월(해당 월 1일부터)
                     start_date = today.replace(day=1) - timedelta(days=60)
-                    cursor.execute(
-                        f"""
+                    base_sql = f"""
                         SELECT DATE_FORMAT(date, '%%Y-%%m') AS ym,
                                SUM(total_requests) AS total,
                                SUM(success_requests) AS success,
@@ -518,9 +525,13 @@ def get_user_key_stats(
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY DATE_FORMAT(date, '%%Y-%%m')
                         ORDER BY ym ASC
-                        """,
-                        params + [start_date],
-                    )
+                        """
+                    bind_params = [current_user["id"], start_date]
+                    if api_type != "all":
+                        bind_params.append(api_type)
+                    if api_key:
+                        bind_params.append(api_key)
+                    cursor.execute(base_sql, bind_params)
                     agg = cursor.fetchall() or []
                     results = to_rows(agg, lambda r: (r.get("ym") or "").replace("-", "/"))
 
