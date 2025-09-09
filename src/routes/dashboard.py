@@ -395,7 +395,7 @@ def get_user_key_stats(
     current_user = Depends(require_auth),
 ):
     """로그인 사용자의 API 키/타입별 사용량 (누락 구간 0 채움)
-    - 데이터 소스: daily_api_stats_by_key
+    - 데이터 소스: daily_user_api_stats
     - api_key 미지정 시: 사용자의 모든 키 합계
     - api_type=all: 타입 합계, 그 외: 지정 타입만
     """
@@ -444,9 +444,9 @@ def get_user_key_stats(
                     base_sql = f"""
                         SELECT date, 
                                SUM(total_requests) AS total,
-                               SUM(success_requests) AS success,
+                               SUM(successful_requests) AS success,
                                SUM(failed_requests) AS failed
-                        FROM daily_api_stats_by_key
+                        FROM daily_user_api_stats
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY date
                         ORDER BY date ASC
@@ -482,9 +482,9 @@ def get_user_key_stats(
                     base_sql = f"""
                         SELECT YEARWEEK(date, 3) AS yw,
                                SUM(total_requests) AS total,
-                               SUM(success_requests) AS success,
+                               SUM(successful_requests) AS success,
                                SUM(failed_requests) AS failed
-                        FROM daily_api_stats_by_key
+                        FROM daily_user_api_stats
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY YEARWEEK(date, 3)
                         ORDER BY yw ASC
@@ -519,9 +519,9 @@ def get_user_key_stats(
                     base_sql = f"""
                         SELECT DATE_FORMAT(date, '%%Y-%%m') AS ym,
                                SUM(total_requests) AS total,
-                               SUM(success_requests) AS success,
+                               SUM(successful_requests) AS success,
                                SUM(failed_requests) AS failed
-                        FROM daily_api_stats_by_key
+                        FROM daily_user_api_stats
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY DATE_FORMAT(date, '%%Y-%%m')
                         ORDER BY ym ASC
