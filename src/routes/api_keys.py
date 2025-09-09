@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import List, Optional, Dict
 import secrets
 import hashlib
+import json
 from datetime import datetime, timedelta
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
@@ -108,6 +109,7 @@ from pydantic import BaseModel
 class CreateApiKeyRequest(BaseModel):
     name: str
     description: Optional[str] = None
+    allowed_origins: Optional[List[str]] = None  # 허용된 도메인 목록
 
 @router.post("/keys/create")
 async def create_api_key(
@@ -127,11 +129,12 @@ async def create_api_key(
                 secret_key = f"rc_sk_{secrets.token_hex(32)}"
                 
                 # DB에 저장
+                allowed_origins_json = json.dumps(request_data.allowed_origins or []) if request_data.allowed_origins else None
                 query = """
-                INSERT INTO api_keys (key_id, secret_key, user_id, name, description, is_active, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO api_keys (key_id, secret_key, user_id, name, description, allowed_origins, is_active, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """
-                cursor.execute(query, (key_id, secret_key, current_user['id'], request_data.name, request_data.description, True, datetime.now()))
+                cursor.execute(query, (key_id, secret_key, current_user['id'], request_data.name, request_data.description, allowed_origins_json, True, datetime.now()))
                 conn.commit()
                 
                 return {
@@ -213,7 +216,7 @@ async def get_api_keys(current_user: Dict = Depends(get_current_user_from_reques
             with conn.cursor() as cursor:
                 # 직접 쿼리로 테스트
                 query = """
-                SELECT id, key_id, name, description, is_active, created_at, updated_at, last_used_at, usage_count
+                SELECT id, key_id, name, description, allowed_origins, is_active, created_at, updated_at, last_used_at, usage_count
                 FROM api_keys
                 WHERE user_id = %s
                 ORDER BY created_at DESC
@@ -223,11 +226,20 @@ async def get_api_keys(current_user: Dict = Depends(get_current_user_from_reques
                 
                 api_keys = []
                 for row in results:
+                    # allowed_origins JSON 파싱
+                    allowed_origins = []
+                    if row['allowed_origins']:
+                        try:
+                            allowed_origins = json.loads(row['allowed_origins'])
+                        except (json.JSONDecodeError, TypeError):
+                            allowed_origins = []
+                    
                     api_keys.append({
                         "id": row['id'],
                         "key_id": row['key_id'],
                         "name": row['name'],
                         "description": row['description'],
+                        "allowed_origins": allowed_origins,
                         "is_active": bool(row['is_active']),
                         "created_at": row['created_at'].isoformat() if row['created_at'] else None,
                         "updated_at": row['updated_at'].isoformat() if row['updated_at'] else None,

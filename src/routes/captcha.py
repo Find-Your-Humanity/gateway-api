@@ -3,6 +3,8 @@ from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any
 import os
 import json
+import secrets
+import hashlib
 from datetime import datetime, timedelta
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
@@ -61,7 +63,7 @@ def verify_api_key_only(api_key: str) -> Dict[str, Any]:
                 # API Key만으로 조회 (Secret Key는 제외)
                 cursor.execute("""
                     SELECT ak.id, ak.user_id, ak.name, ak.is_active, ak.rate_limit_per_minute, 
-                           ak.rate_limit_per_day, ak.usage_count, ak.last_used_at,
+                           ak.rate_limit_per_day, ak.usage_count, ak.last_used_at, ak.allowed_origins,
                            u.email, us.plan_id, p.name as plan_name, p.max_requests_per_month
                     FROM api_keys ak
                     JOIN users u ON ak.user_id = u.id
@@ -83,14 +85,145 @@ def verify_api_key_only(api_key: str) -> Dict[str, Any]:
                     'rate_limit_per_day': result[5],
                     'usage_count': result[6],
                     'last_used_at': result[7],
-                    'user_email': result[8],
-                    'plan_id': result[9],
-                    'plan_name': result[10],
-                    'max_requests_per_month': result[11]
+                    'allowed_origins': result[8],
+                    'user_email': result[9],
+                    'plan_id': result[10],
+                    'plan_name': result[11],
+                    'max_requests_per_month': result[12]
                 }
     except Exception as e:
         print(f"API 키 검증 오류: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+def verify_domain_access(api_key_info: Dict[str, Any], request_domain: str) -> bool:
+    """
+    API 키의 도메인 제한을 확인합니다.
+    """
+    try:
+        allowed_domains = api_key_info.get('allowed_origins')
+        
+        # allowed_domains가 없거나 비어있으면 모든 도메인 허용
+        if not allowed_domains:
+            return True
+        
+        # JSON 문자열인 경우 파싱
+        if isinstance(allowed_domains, str):
+            try:
+                allowed_domains = json.loads(allowed_domains)
+            except (json.JSONDecodeError, TypeError):
+                return True  # 파싱 실패 시 모든 도메인 허용
+        
+        # 도메인 목록이 비어있으면 모든 도메인 허용
+        if not allowed_domains or len(allowed_domains) == 0:
+            return True
+        
+        # 요청 도메인이 허용 목록에 있는지 확인
+        # 정확한 매치 또는 서브도메인 매치 지원
+        for allowed_domain in allowed_domains:
+            if allowed_domain.startswith('*.'):
+                # 와일드카드 서브도메인 매치 (예: *.example.com)
+                domain_suffix = allowed_domain[2:]  # *. 제거
+                if request_domain == domain_suffix or request_domain.endswith('.' + domain_suffix):
+                    return True
+            else:
+                # 정확한 도메인 매치
+                if request_domain == allowed_domain:
+                    return True
+        
+        return False
+    except Exception as e:
+        print(f"도메인 검증 오류: {e}")
+        return True  # 오류 시 허용 (보안보다는 가용성 우선)
+
+def generate_captcha_token(api_key_info: Dict[str, Any], captcha_type: str, challenge_data: Dict[str, Any]) -> str:
+    """
+    캡차 토큰을 생성합니다. (일회성 사용)
+    """
+    try:
+        # 토큰 생성
+        token_id = secrets.token_hex(16)
+        token_data = {
+            'token_id': token_id,
+            'api_key_id': api_key_info['api_key_id'],
+            'user_id': api_key_info['user_id'],
+            'captcha_type': captcha_type,
+            'challenge_data': challenge_data,
+            'created_at': datetime.now().isoformat(),
+            'expires_at': (datetime.now() + timedelta(minutes=10)).isoformat(),  # 10분 만료
+            'is_used': False
+        }
+        
+        # Redis 또는 DB에 토큰 저장 (여기서는 DB 사용)
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO captcha_tokens (token_id, api_key_id, user_id, captcha_type, 
+                                              challenge_data, created_at, expires_at, is_used)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    token_id,
+                    api_key_info['api_key_id'],
+                    api_key_info['user_id'],
+                    captcha_type,
+                    json.dumps(challenge_data),
+                    datetime.now(),
+                    datetime.now() + timedelta(minutes=10),
+                    False
+                ))
+                conn.commit()
+        
+        return token_id
+    except Exception as e:
+        print(f"토큰 생성 오류: {e}")
+        raise HTTPException(status_code=500, detail="Token generation failed")
+
+def verify_captcha_token(token_id: str, api_key_info: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    캡차 토큰을 검증하고 일회성 사용을 보장합니다.
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 토큰 조회
+                cursor.execute("""
+                    SELECT token_id, api_key_id, user_id, captcha_type, challenge_data, 
+                           created_at, expires_at, is_used
+                    FROM captcha_tokens
+                    WHERE token_id = %s AND api_key_id = %s
+                """, (token_id, api_key_info['api_key_id']))
+                
+                result = cursor.fetchone()
+                if not result:
+                    raise HTTPException(status_code=400, detail="Invalid token")
+                
+                # 만료 확인
+                if result['expires_at'] < datetime.now():
+                    raise HTTPException(status_code=400, detail="Token expired")
+                
+                # 사용 여부 확인
+                if result['is_used']:
+                    raise HTTPException(status_code=400, detail="Token already used")
+                
+                # 토큰을 사용됨으로 표시 (일회성 보장)
+                cursor.execute("""
+                    UPDATE captcha_tokens 
+                    SET is_used = 1, used_at = NOW()
+                    WHERE token_id = %s
+                """, (token_id,))
+                conn.commit()
+                
+                return {
+                    'token_id': result['token_id'],
+                    'captcha_type': result['captcha_type'],
+                    'challenge_data': json.loads(result['challenge_data']) if result['challenge_data'] else {},
+                    'created_at': result['created_at'].isoformat(),
+                    'expires_at': result['expires_at'].isoformat()
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"토큰 검증 오류: {e}")
+        raise HTTPException(status_code=500, detail="Token verification failed")
 
 def check_rate_limit(api_key_info: Dict[str, Any]) -> bool:
     """
@@ -185,6 +318,11 @@ async def next_captcha(request: Request):
         # API 키만으로 검증 (클라이언트용)
         api_key_info = verify_api_key_only(api_key)
         
+        # 도메인 제한 확인
+        request_domain = request.headers.get('origin', '').replace('https://', '').replace('http://', '')
+        if not verify_domain_access(api_key_info, request_domain):
+            raise HTTPException(status_code=403, detail="Domain not allowed for this API key")
+        
         # 사용량 제한 확인
         if not check_rate_limit(api_key_info):
             raise HTTPException(status_code=429, detail="Rate limit exceeded")
@@ -220,6 +358,15 @@ async def next_captcha(request: Request):
             captcha_types = ['imagecaptcha', 'handwritingcaptcha', 'abstractcaptcha']
             next_captcha_type = random.choice(captcha_types)
         
+        # 캡차 토큰 생성
+        challenge_data = {
+            'captcha_type': next_captcha_type,
+            'confidence_score': confidence_score,
+            'is_bot_detected': is_bot_detected,
+            'behavior_data': behavior_data
+        }
+        captcha_token = generate_captcha_token(api_key_info, next_captcha_type, challenge_data)
+        
         # API 사용량 로그 기록
         await log_api_usage(api_key_info, request_data)
         
@@ -228,6 +375,7 @@ async def next_captcha(request: Request):
             "success": True,
             "next_captcha": next_captcha_type,
             "captcha_type": next_captcha_type,
+            "captcha_token": captcha_token,  # 일회성 토큰
             "confidence_score": confidence_score,
             "is_bot_detected": is_bot_detected,
             "ml_service_used": "basic_behavior_analysis",
@@ -311,10 +459,13 @@ async def verify_captcha(request: Request):
         api_key = request_data.get('site_key', '')  # API Key
         secret_key = request_data.get('secret_key', '')  # Secret Key
         captcha_response = request_data.get('response', '')
-        captcha_type = request_data.get('captcha_type', '')
+        captcha_token = request_data.get('captcha_token', '')  # 일회성 토큰
         
         if not api_key or not secret_key:
             raise HTTPException(status_code=401, detail="API key and secret key required")
+        
+        if not captcha_token:
+            raise HTTPException(status_code=400, detail="Captcha token required")
         
         # API Key와 Secret Key 함께 검증
         api_key_info = verify_api_key_with_secret(api_key, secret_key)
@@ -323,20 +474,28 @@ async def verify_captcha(request: Request):
         if not check_rate_limit(api_key_info):
             raise HTTPException(status_code=429, detail="Rate limit exceeded")
         
+        # 캡차 토큰 검증 (일회성 사용 보장)
+        token_info = verify_captcha_token(captcha_token, api_key_info)
+        
         # 캡차 검증 로직 (간단한 예시)
         # 실제로는 ML 서비스와 연동하여 검증 수행
         is_valid = len(captcha_response) > 0  # 간단한 검증
         
         # API 사용량 로그 기록
-        log_api_usage(api_key_info, request_data)
+        await log_api_usage(api_key_info, request_data)
         
         # 응답 데이터
         response_data = {
             "success": is_valid,
             "score": 0.9 if is_valid else 0.0,
             "action": "captcha_verification",
-            "challenge_ts": datetime.now().isoformat(),
+            "challenge_ts": token_info['created_at'],
             "hostname": request.headers.get('host', ''),
+            "token_info": {
+                "token_id": token_info['token_id'],
+                "captcha_type": token_info['captcha_type'],
+                "used_once": True  # 일회성 사용 확인
+            },
             "api_key_info": {
                 "key_name": api_key_info['key_name'],
                 "usage_count": api_key_info['usage_count'] + 1,
