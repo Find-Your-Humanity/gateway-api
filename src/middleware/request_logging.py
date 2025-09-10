@@ -37,19 +37,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method
         user_agent = request.headers.get("user-agent", "")
-        
-        # 디버그: 모든 요청 로깅
-        logger.info(f"🔍 RequestLoggingMiddleware 작동 중: {method} {path}")
-        
+
         # 제외할 경로 체크 - 로깅하지 않고 바로 응답
         if any(path.startswith(excluded_path) for excluded_path in self.EXCLUDED_PATHS):
-            logger.info(f"🚫 로깅 제외 경로: {path} - 헬스체크/모니터링용")
             response = await call_next(request)
             return response
         
         # 캡차 검증 API가 아닌 경우 로깅하지 않음 (성능 최적화)
         if not any(path.startswith(captcha_path) for captcha_path in self.CAPTCHA_VERIFICATION_PATHS):
-            logger.info(f"🚫 로깅 제외 경로: {path} - 캡차 검증 API가 아님")
             response = await call_next(request)
             return response
         

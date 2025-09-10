@@ -13,23 +13,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 모듈 내 print 호출을 로거로 매핑합니다.
-# 간단 규칙: '❌' 또는 '오류' 또는 'error' 포함 시 error, '⚠️' 포함 시 warning, 그 외 info
-
-def _captcha_print(*args, sep=" ", end="\n"):
-    try:
-        msg = sep.join(str(a) for a in args)
-    except Exception:
-        msg = " ".join(map(str, args))
-    low = msg.lower()
-    if ("❌" in msg) or ("오류" in msg) or ("error" in low):
-        logger.error(msg)
-    elif "⚠️" in msg:
-        logger.warning(msg)
-    else:
-        logger.info(msg)
-
-print = _captcha_print
 
 router = APIRouter(prefix="/api", tags=["captcha"])
 
@@ -71,7 +54,7 @@ def verify_api_key_with_secret(api_key: str, secret_key: str) -> Dict[str, Any]:
                     'max_requests_per_month': result[11]
                 }
     except Exception as e:
-        print(f"API 키 검증 오류: {e}")
+        logger.error(f"API 키 검증 오류: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 def verify_api_key_only(api_key: str) -> Dict[str, Any]:
@@ -113,7 +96,7 @@ def verify_api_key_only(api_key: str) -> Dict[str, Any]:
                     'max_requests_per_month': result[12]
                 }
     except Exception as e:
-        print(f"API 키 검증 오류: {e}")
+        logger.error(f"API 키 검증 오류: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 def verify_domain_access(api_key_info: Dict[str, Any], request_domain: str) -> bool:
@@ -153,7 +136,7 @@ def verify_domain_access(api_key_info: Dict[str, Any], request_domain: str) -> b
         
         return False
     except Exception as e:
-        print(f"도메인 검증 오류: {e}")
+        logger.error(f"도메인 검증 오류: {e}")
         return True  # 오류 시 허용 (보안보다는 가용성 우선)
 
 def generate_captcha_token(api_key_info: Dict[str, Any], captcha_type: str, challenge_data: Dict[str, Any]) -> str:
@@ -195,7 +178,7 @@ def generate_captcha_token(api_key_info: Dict[str, Any], captcha_type: str, chal
         
         return token_id
     except Exception as e:
-        print(f"토큰 생성 오류: {e}")
+        logger.exception(f"토큰 생성 오류: {e}")
         raise HTTPException(status_code=500, detail="Token generation failed")
 
 def verify_captcha_token(token_id: str, api_key_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -243,7 +226,7 @@ def verify_captcha_token(token_id: str, api_key_info: Dict[str, Any]) -> Dict[st
     except HTTPException:
         raise
     except Exception as e:
-        print(f"토큰 검증 오류: {e}")
+        logger.exception(f"토큰 검증 오류: {e}")
         raise HTTPException(status_code=500, detail="Token verification failed")
 
 def check_rate_limit(api_key_info: Dict[str, Any]) -> bool:
@@ -286,7 +269,7 @@ def check_rate_limit(api_key_info: Dict[str, Any]) -> bool:
                 
                 return True
     except Exception as e:
-        print(f"사용량 제한 확인 오류: {e}")
+        logger.error(f"사용량 제한 확인 오류: {e}")
         return False
 
 async def log_api_usage(api_key_info: Dict[str, Any], request_data: Dict[str, Any]):
@@ -323,7 +306,7 @@ async def log_api_usage(api_key_info: Dict[str, Any], request_data: Dict[str, An
                 await usage_service.increment_captcha_usage(api_key_info['user_id'])
                 
     except Exception as e:
-        print(f"API 사용량 로그 기록 오류: {e}")
+        logger.error(f"API 사용량 로그 기록 오류: {e}")
 
 @router.post("/next-captcha")
 async def next_captcha(request: Request):
@@ -412,7 +395,7 @@ async def next_captcha(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"next-captcha API 오류: {e}")
+        logger.exception(f"next-captcha API 오류: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/verify-handwriting")
@@ -466,7 +449,7 @@ async def verify_handwriting(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"verify-handwriting API 오류: {e}")
+        logger.exception(f"verify-handwriting API 오류: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/verify-captcha")
@@ -528,5 +511,5 @@ async def verify_captcha(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"verify-captcha API 오류: {e}")
+        logger.exception(f"verify-captcha API 오류: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

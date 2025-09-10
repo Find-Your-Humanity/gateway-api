@@ -51,26 +51,7 @@ def _setup_logging():
         logging.getLogger(name).setLevel(level)
 
 
-def _redirect_print_to_logging():
-    logger = logging.getLogger("app.print")
-
-    def _patched_print(*args, sep=" ", end="\n", file=None, flush=False):
-        try:
-            message = sep.join(str(a) for a in args)
-        except Exception:
-            message = " ".join(map(str, args))
-        if file is None or file is sys.stdout:
-            logger.info(message)
-        elif file is sys.stderr:
-            logger.error(message)
-        else:
-            logger.info(message)
-
-    builtins.print = _patched_print
-
-
 _setup_logging()
-_redirect_print_to_logging()
 
 logger = logging.getLogger(__name__)
 

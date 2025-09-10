@@ -10,24 +10,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 모듈 내 print 호출을 로거로 매핑합니다.
-# 규칙: '❌' 또는 '오류' 또는 'error' 포함 시 error, '⚠️' 포함 시 warning, 그 외 info
-
-def _api_keys_print(*args, sep=" ", end="\n"):
-    try:
-        msg = sep.join(str(a) for a in args)
-    except Exception:
-        msg = " ".join(map(str, args))
-    low = msg.lower()
-    if ("❌" in msg) or ("오류" in msg) or ("error" in low):
-        logger.error(msg)
-    elif "⚠️" in msg:
-        logger.warning(msg)
-    else:
-        logger.info(msg)
-
-print = _api_keys_print
-
 router = APIRouter(prefix="/api", tags=["API Keys"])
 
 class APIKeyService:
@@ -140,8 +122,8 @@ async def create_api_key(
     """새로운 API 키 생성"""
     try:
         # 디버깅: 요청 데이터 확인
-        print(f"🔍 Debug - request_data: {request_data}")
-        print(f"🔍 Debug - current_user: {current_user}")
+        logger.debug(f"🔍 Debug - request_data: {request_data}")
+        logger.debug(f"🔍 Debug - current_user: {current_user}")
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -167,7 +149,7 @@ async def create_api_key(
     except Exception as e:
         import traceback
         error_detail = f"API 키 생성 실패: {str(e)}\n{traceback.format_exc()}"
-        print(f"❌ Error: {error_detail}")
+        logger.exception(f"❌ Error: {error_detail}")
         raise HTTPException(status_code=500, detail=error_detail)
 
 @router.get("/keys/test-auth")
@@ -231,7 +213,7 @@ async def get_api_keys(current_user: Dict = Depends(get_current_user_from_reques
     """사용자의 API 키 목록 조회"""
     try:
         # 디버깅: current_user 정보 확인
-        print(f"🔍 Debug - current_user: {current_user}")
+        logger.debug(f"🔍 Debug - current_user: {current_user}")
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -279,7 +261,7 @@ async def get_api_keys(current_user: Dict = Depends(get_current_user_from_reques
     except Exception as e:
         import traceback
         error_detail = f"API 키 목록 조회 실패: {str(e)}\n{traceback.format_exc()}"
-        print(f"❌ Error: {error_detail}")
+        logger.exception(f"❌ Error: {error_detail}")
         raise HTTPException(status_code=500, detail=error_detail)
 
 class ToggleApiKeyRequest(BaseModel):
@@ -313,7 +295,7 @@ async def toggle_api_key(
     except Exception as e:
         import traceback
         error_detail = f"API 키 상태 변경 실패: {str(e)}\n{traceback.format_exc()}"
-        print(f"❌ Error: {error_detail}")
+        logger.exception(f"❌ Error: {error_detail}")
         raise HTTPException(status_code=500, detail=error_detail)
 
 @router.delete("/keys/{key_id}")
@@ -342,5 +324,5 @@ async def delete_api_key(
     except Exception as e:
         import traceback
         error_detail = f"API 키 삭제 실패: {str(e)}\n{traceback.format_exc()}"
-        print(f"❌ Error: {error_detail}")
+        logger.exception(f"❌ Error: {error_detail}")
         raise HTTPException(status_code=500, detail=error_detail)

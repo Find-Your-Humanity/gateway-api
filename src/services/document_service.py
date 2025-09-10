@@ -7,23 +7,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 모듈 내 print 호출을 로거로 매핑합니다.
-# 규칙: '❌' 또는 '오류' 또는 'error' 포함 시 error, '⚠️' 포함 시 warning, 그 외 info
-
-def _doc_print(*args, sep=" ", end="\n"):
-    try:
-        msg = sep.join(str(a) for a in args)
-    except Exception:
-        msg = " ".join(map(str, args))
-    low = msg.lower()
-    if ("❌" in msg) or ("오류" in msg) or ("error" in low):
-        logger.error(msg)
-    elif "⚠️" in msg:
-        logger.warning(msg)
-    else:
-        logger.info(msg)
-
-print = _doc_print
 
 class DocumentService:
     def __init__(self):
@@ -91,12 +74,12 @@ class DocumentService:
         """문서 파일 경로 반환"""
         # 사이드바 아이템을 실제 파일명으로 변환
         filename = self._normalize_document_type(document_type)
-        print(f"🔍 파일명 정규화: {document_type} -> {filename}")
+        logger.info(f"🔍 파일명 정규화: {document_type} -> {filename}")
         
         doc_path = self.documents_dir / language / f"{filename}.md"
-        print(f"🔍 최종 파일 경로: {doc_path}")
-        print(f"🔍 문서 디렉토리: {self.documents_dir}")
-        print(f"🔍 언어 디렉토리: {self.documents_dir / language}")
+        logger.info(f"🔍 최종 파일 경로: {doc_path}")
+        logger.info(f"🔍 문서 디렉토리: {self.documents_dir}")
+        logger.info(f"🔍 언어 디렉토리: {self.documents_dir / language}")
         
         return doc_path
     

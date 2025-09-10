@@ -7,25 +7,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 모듈 내 print 호출을 로거로 매핑하여 일관된 로깅을 보장합니다.
-# 메시지 이모지 힌트를 간단히 레벨로 매핑합니다.
-# - ❌: error, ⚠️: warning, 그 외(🔍, ✅, 📊 등): info
-# 가능하면 신규 코드는 logger.info()/warning()/error()/exception()을 직접 사용하세요.
-
-def _admin_documents_print(*args, sep=" ", end="\n"):
-    try:
-        msg = sep.join(str(a) for a in args)
-    except Exception:
-        msg = " ".join(map(str, args))
-    if "❌" in msg:
-        logger.error(msg)
-    elif "⚠️" in msg:
-        logger.warning(msg)
-    else:
-        logger.info(msg)
-
-print = _admin_documents_print
-
 router = APIRouter(prefix="/api/admin", tags=["admin_documents"])
 
 # 요청/응답 모델
@@ -50,16 +31,16 @@ async def get_document(
     document_type: str
 ):
     """문서 내용 조회 (공개 엔드포인트)"""
-    print(f"🔍 API 요청 수신: language={language}, document_type={document_type}")
+    logger.info(f"🔍 API 요청 수신: language={language}, document_type={document_type}")
     try:
         result = await document_service.get_document(language, document_type)
-        print(f"🔍 API 응답 성공: {result}")
+        logger.info(f"🔍 API 응답 성공: {result}")
         return result
     except HTTPException:
-        print(f"🔍 API HTTP 오류 발생: {HTTPException}")
+        logger.warning(f"🔍 API HTTP 오류 발생: {HTTPException}")
         raise
     except Exception as e:
-        print(f"🔍 API 일반 오류 발생: {str(e)}")
+        logger.exception(f"🔍 API 일반 오류 발생: {str(e)}")
         raise HTTPException(status_code=500, detail=f"문서 조회 중 오류 발생: {str(e)}")
 
 @router.post("/documents/update", response_model=DocumentResponse)
@@ -68,11 +49,11 @@ async def update_document(
     current_user = Depends(require_admin)
 ):
     """문서 내용 업데이트 (관리자 전용)"""
-    print(f"🔍 문서 업데이트 요청 수신")
-    print(f"🔍 요청 데이터: language={request.language}, document_type={request.document_type}")
-    print(f"🔍 콘텐츠 길이: {len(request.content)}")
-    print(f"🔍 콘텐츠 미리보기: {request.content[:100]}...")
-    print(f"🔍 현재 사용자: {current_user}")
+    logger.info("🔍 문서 업데이트 요청 수신")
+    logger.info(f"🔍 요청 데이터: language={request.language}, document_type={request.document_type}")
+    logger.info(f"🔍 콘텐츠 길이: {len(request.content)}")
+    logger.debug(f"🔍 콘텐츠 미리보기: {request.content[:100]}...")
+    logger.debug(f"🔍 현재 사용자: {current_user}")
     
     try:
         result = await document_service.update_document(
@@ -80,15 +61,14 @@ async def update_document(
             request.document_type,
             request.content
         )
-        print(f"🔍 문서 업데이트 성공: {result}")
+        logger.info(f"🔍 문서 업데이트 성공: {result}")
         return result
     except HTTPException:
-        print(f"🔍 문서 업데이트 HTTP 오류 발생: {HTTPException}")
+        logger.warning(f"🔍 문서 업데이트 HTTP 오류 발생: {HTTPException}")
         raise
     except Exception as e:
-        print(f"🔍 문서 업데이트 일반 오류 발생: {str(e)}")
         import traceback
-        print(f"🔍 오류 상세: {traceback.format_exc()}")
+        logger.exception(f"🔍 문서 업데이트 일반 오류 발생: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"문서 업데이트 중 오류 발생: {str(e)}")
 
 @router.get("/documents", response_model=DocumentResponse)
