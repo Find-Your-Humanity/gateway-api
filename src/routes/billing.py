@@ -5,6 +5,28 @@ import json
 from pydantic import BaseModel
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 모듈 내 print 호출을 로거로 매핑하여 일관된 로깅을 보장합니다.
+# 메시지에 포함된 이모지 힌트로 레벨을 간단 매핑합니다.
+# - ❌: error, ⚠️: warning, 그 외(🔍, ✅, 📊 등): info
+# 이 설정으로 본 파일의 모든 print(...)는 자동으로 logger로 기록됩니다.
+
+def _billing_print(*args, sep=" ", end="\n"):
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(map(str, args))
+    if "❌" in msg:
+        logger.error(msg)
+    elif "⚠️" in msg:
+        logger.warning(msg)
+    else:
+        logger.info(msg)
+
+print = _billing_print
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 

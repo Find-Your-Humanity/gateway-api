@@ -1,5 +1,26 @@
 from datetime import datetime, date
 from src.config.database import get_db_connection
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 모듈 내 print 호출을 로거로 매핑합니다.
+# 규칙: '❌' 또는 '오류' 또는 'error' 포함 시 error, '⚠️' 포함 시 warning, 그 외 info
+
+def _usage_print(*args, sep=" ", end="\n"):
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(map(str, args))
+    low = msg.lower()
+    if ("❌" in msg) or ("오류" in msg) or ("error" in low):
+        logger.error(msg)
+    elif "⚠️" in msg:
+        logger.warning(msg)
+    else:
+        logger.info(msg)
+
+print = _usage_print
 
 class UsageService:
     """사용자별 캡차 API 사용량 추적 서비스"""

@@ -1,3 +1,79 @@
+import os
+import sys
+import logging
+import builtins
+
+# 로깅 설정 및 사용 가이드 (gateway-api)
+# ------------------------------------------------------------
+# 1) 기본 동작
+#    - 애플리케이션 시작 시 _setup_logging()이 표준 로깅을 초기화합니다.
+#    - 환경변수 GATEWAY_API_LOG_LEVEL (기본: INFO)로 로그 레벨을 제어할 수 있습니다.
+#      예) Windows PowerShell: $env:GATEWAY_API_LOG_LEVEL = "DEBUG"
+#    - 로그 포맷: [YYYY-MM-DD HH:MM:SS] LEVEL logger.name: message
+#    - uvicorn/fastapi 로거 레벨도 동일하게 맞춥니다.
+#
+# 2) print 리다이렉트
+#    - _redirect_print_to_logging()이 builtins.print를 로거(app.print)로 연결합니다.
+#    - 기존 코드의 print는 logger.info(표준출력), logger.error(표준에러)로 기록됩니다.
+#    - 가능하면 신규 코드는 직접 logger = logging.getLogger(__name__) 후
+#      logger.info()/warning()/error()/exception()을 사용하세요.
+#
+# 3) 레벨 선택 가이드
+#    - 상세 진단/디버깅: logger.debug
+#    - 일반 정보(정상 흐름): logger.info
+#    - 주의/잠재적 문제: logger.warning
+#    - 오류(처리 가능): logger.error
+#    - 예외 스택과 함께 기록: logger.exception (except 블록 내부에서 사용)
+#
+# 4) 모듈별 권장 패턴
+#    import logging
+#    logger = logging.getLogger(__name__)
+#    ...
+#    logger.info("처리 완료")
+# ------------------------------------------------------------
+# Configure logging and redirect print to logging at import time
+
+def _setup_logging():
+    level_name = os.getenv("GATEWAY_API_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    root = logging.getLogger()
+    # If no handlers are set (e.g., running under plain uvicorn can add its own), add one
+    if not root.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter(
+            "[%(asctime)s] %(levelname)s %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"
+        )
+        handler.setFormatter(formatter)
+        root.addHandler(handler)
+    root.setLevel(level)
+    # Align common library loggers with our level
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi"):
+        logging.getLogger(name).setLevel(level)
+
+
+def _redirect_print_to_logging():
+    logger = logging.getLogger("app.print")
+
+    def _patched_print(*args, sep=" ", end="\n", file=None, flush=False):
+        try:
+            message = sep.join(str(a) for a in args)
+        except Exception:
+            message = " ".join(map(str, args))
+        if file is None or file is sys.stdout:
+            logger.info(message)
+        elif file is sys.stderr:
+            logger.error(message)
+        else:
+            logger.info(message)
+
+    builtins.print = _patched_print
+
+
+_setup_logging()
+_redirect_print_to_logging()
+
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -108,60 +184,60 @@ def health_check():
 @app.on_event("startup")
 async def startup_event():
     """애플리케이션 시작 시 데이터베이스 연결 테스트"""
-    print("🚀 Real Captcha Gateway API 시작 중...")
+    logger.info("🚀 Real Captcha Gateway API 시작 중...")
     
     # 데이터베이스 연결 테스트
     if test_connection():
-        print("데이터베이스 연결 성공!")
+        logger.info("데이터베이스 연결 성공!")
         # 데이터베이스 초기화 (테이블 생성)
         try:
             init_database()
         except Exception as e:
-            print(f"데이터베이스 초기화 실패: {e}")
+            logger.exception(f"데이터베이스 초기화 실패: {e}")
         # 만료 토큰 정리 1회 수행 및 주기 실행
         try:
             deleted = cleanup_password_reset_tokens()
             if deleted:
-                print(f"만료/사용 토큰 정리: {deleted}건 삭제")
+                logger.info(f"만료/사용 토큰 정리: {deleted}건 삭제")
             deleted_codes = cleanup_password_reset_codes()
             if deleted_codes:
-                print(f"만료/사용 코드 정리: {deleted_codes}건 삭제")
+                logger.info(f"만료/사용 코드 정리: {deleted_codes}건 삭제")
         except Exception as e:
-            print(f"토큰/코드 정리 실패: {e}")
+            logger.exception(f"토큰/코드 정리 실패: {e}")
 
         async def periodic_cleanup():
             while True:
                 try:
                     deleted = cleanup_password_reset_tokens()
                     if deleted:
-                        print(f"(주기) 만료/사용 토큰 정리: {deleted}건 삭제")
+                        logger.info(f"(주기) 만료/사용 토큰 정리: {deleted}건 삭제")
                     deleted_codes = cleanup_password_reset_codes()
                     if deleted_codes:
-                        print(f"(주기) 만료/사용 코드 정리: {deleted_codes}건 삭제")
+                        logger.info(f"(주기) 만료/사용 코드 정리: {deleted_codes}건 삭제")
                     # 중복 데이터 정리 (매일 한 번만 실행)
                     if datetime.now().hour == 0 and datetime.now().minute < 5:  # 자정 이후 5분 내에만 실행
                         cleaned = cleanup_duplicate_request_statistics()
                         if cleaned > 0:
-                            print(f"🧹 중복 데이터 정리: {cleaned}건 삭제")
+                            logger.info(f"🧹 중복 데이터 정리: {cleaned}건 삭제")
                     
                     # 집계 작업 수행
                     a = aggregate_request_statistics(30)
                     e = aggregate_error_stats_daily(30)
                     p = aggregate_endpoint_usage_daily(30)
-                    print(f"📈 집계 업데이트: stats={a}, error={e}, endpoint={p}")
+                    logger.info(f"📈 집계 업데이트: stats={a}, error={e}, endpoint={p}")
                     
                     # 사용량 리셋 작업 수행 (매분, 매일, 매월)
                     reset_result = await usage_service.reset_periodic_usage()
                     if reset_result:
-                        print(f"🔄 사용량 리셋 완료")
+                        logger.info("🔄 사용량 리셋 완료")
                     
                 except Exception as e:
-                    print(f"⚠️(주기) 토큰/코드 정리 실패: {e}")
+                    logger.exception(f"⚠️(주기) 토큰/코드 정리 실패: {e}")
                 await asyncio.sleep(60)  # 1분 간격으로 변경 (분당 리셋을 위해)
 
         asyncio.create_task(periodic_cleanup())
     else:
-        print("❌ 데이터베이스 연결 실패!")
+        logger.error("❌ 데이터베이스 연결 실패!")
 
 @app.get("/api/status")
 def api_status():

@@ -3,6 +3,28 @@ from pydantic import BaseModel
 from typing import Optional
 from src.services.document_service import document_service
 from src.utils.auth import get_current_user, verify_admin_permission
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 모듈 내 print 호출을 로거로 매핑하여 일관된 로깅을 보장합니다.
+# 메시지 이모지 힌트를 간단히 레벨로 매핑합니다.
+# - ❌: error, ⚠️: warning, 그 외(🔍, ✅, 📊 등): info
+# 가능하면 신규 코드는 logger.info()/warning()/error()/exception()을 직접 사용하세요.
+
+def _admin_documents_print(*args, sep=" ", end="\n"):
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(map(str, args))
+    if "❌" in msg:
+        logger.error(msg)
+    elif "⚠️" in msg:
+        logger.warning(msg)
+    else:
+        logger.info(msg)
+
+print = _admin_documents_print
 
 router = APIRouter(prefix="/api/admin", tags=["admin_documents"])
 

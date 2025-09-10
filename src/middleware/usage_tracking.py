@@ -131,7 +131,7 @@ class UsageTrackingMiddleware(BaseHTTPMiddleware):
             
             conn.commit()
         except Exception as e:
-            print(f"Usage tracking error: {e}")
+            logger.error(f"Usage tracking error: {e}")
             conn.rollback()
         finally:
             cursor.close()

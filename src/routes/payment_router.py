@@ -8,6 +8,9 @@ import uuid
 from datetime import datetime
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
+import logging
+
+logger = logging.getLogger(__name__)
 
 def generate_unique_payment_id() -> str:
     """고유한 결제 ID 생성"""
@@ -51,12 +54,12 @@ async def confirm_payment(
 ):
     """Toss Payments 결제 승인 처리"""
     try:
-        print(f"🔍 결제 승인 요청 - 사용자 ID: {user['id']}, 플랜 ID: {request.plan_id}")
+        logger.info(f"🔍 결제 승인 요청 - 사용자 ID: {user['id']}, 플랜 ID: {request.plan_id}")
         
         # 1. 결제 승인 (DASHBOARD_DIRECT는 내장 승인 경로)
         payment_data = None
         if request.paymentKey == 'DASHBOARD_DIRECT':
-            print("🟦 대시보드 직접 결제 승인(DASHBOARD_DIRECT) 경로")
+            logger.info("🟦 대시보드 직접 결제 승인(DASHBOARD_DIRECT) 경로")
             payment_data = {
                 "paymentKey": request.paymentKey,
                 "orderId": request.orderId,
@@ -76,22 +79,22 @@ async def confirm_payment(
                 "orderId": request.orderId,
                 "amount": request.amount
             }
-            print(f"📤 Toss Payments API 호출: {payload}")
+            logger.info(f"📤 Toss Payments API 호출: {payload}")
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     TOSS_API_URL,
                     headers=headers,
                     json=payload
                 )
-            print(f"📥 Toss Payments 응답: {response.status_code}")
+            logger.info(f"📥 Toss Payments 응답: {response.status_code}")
             if response.status_code != 200:
-                print(f"❌ Toss Payments API 오류: {response.text}")
+                logger.error(f"❌ Toss Payments API 오류: {response.text}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"결제 승인 실패: {response.text}"
                 )
             payment_data = response.json()
-            print(f"✅ Toss Payments 결제 승인 성공: {payment_data}")
+            logger.info(f"✅ Toss Payments 결제 승인 성공: {payment_data}")
         
         # 2. 결제 성공 시 DB에 구독 정보 저장
         with get_db_connection() as conn:
@@ -136,7 +139,7 @@ async def confirm_payment(
                     
                     conn.commit()
                     
-                    print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
+                    logger.info(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
                     
                     # plan 데이터에서 요금제 이름 추출 (dict 또는 tuple 모두 지원)
                     if isinstance(plan, dict):
@@ -155,7 +158,7 @@ async def confirm_payment(
                     
                 except Exception as e:
                     conn.rollback()
-                    print(f"❌ DB 저장 오류: {e}")
+                    logger.exception(f"❌ DB 저장 오류: {e}")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=f"구독 정보 저장 중 오류가 발생했습니다: {str(e)}"
@@ -164,9 +167,7 @@ async def confirm_payment(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ 결제 승인 처리 오류: {e}")
-        import traceback
-        print(f"❌ 스택 트레이스: {traceback.format_exc()}")
+        logger.exception(f"❌ 결제 승인 처리 오류: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"결제 승인 처리 중 오류가 발생했습니다: {str(e)}"
@@ -179,11 +180,11 @@ async def complete_payment(
 ):
     """Toss Payments 승인 완료 후 구독 정보 저장"""
     if not user:
-        print("❌ 결제 완료 요청: 사용자 인증 실패")
+        logger.error("❌ 결제 완료 요청: 사용자 인증 실패")
         raise HTTPException(status_code=401, detail="사용자 인증이 필요합니다.")
     
     try:
-        print(f"🔍 결제 완료 처리 - 사용자 ID: {user['id']}, 플랜 ID: {request.plan_id}")
+        logger.info(f"🔍 결제 완료 처리 - 사용자 ID: {user['id']}, 플랜 ID: {request.plan_id}")
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -235,7 +236,7 @@ async def complete_payment(
                     
                     # 고유한 payment_id 생성
                     unique_payment_id = generate_unique_payment_id()
-                    print(f"🔑 생성된 payment_id: {unique_payment_id}")
+                    logger.info(f"🔑 생성된 payment_id: {unique_payment_id}")
                     
                     # payment_logs 테이블에 결제 기록 저장
                     try:
@@ -243,18 +244,11 @@ async def complete_payment(
                             INSERT INTO payment_logs (user_id, plan_id, paid_at, amount, payment_method, payment_id, status)
                             VALUES (%s, %s, NOW(), %s, 'card', %s, 'completed')
                         """, (user["id"], request.plan_id, request.amount, unique_payment_id))
-                        print(f"✅ payment_logs 저장 성공: {unique_payment_id}")
+                        logger.info(f"✅ payment_logs 저장 성공: {unique_payment_id}")
                     except Exception as payment_log_error:
-                        print(f"❌ payment_logs 저장 실패: {payment_log_error}")
-                        print(f"❌ Error type: {type(payment_log_error).__name__}")
-                        if hasattr(payment_log_error, 'args'):
-                            print(f"❌ Error args: {payment_log_error.args}")
-                        if hasattr(payment_log_error, 'errno'):
-                            print(f"❌ MySQL Error Code: {payment_log_error.errno}")
-                        if hasattr(payment_log_error, 'sqlstate'):
-                            print(f"❌ SQL State: {payment_log_error.sqlstate}")
+                        logger.exception(f"❌ payment_logs 저장 실패: {payment_log_error}")
                         # payment_logs 저장 실패 시에도 구독은 유지
-                        print(f"⚠️ payment_logs 저장 실패했지만 구독은 유지됨 (ID: {subscription_id})")
+                        logger.warning(f"⚠️ payment_logs 저장 실패했지만 구독은 유지됨 (ID: {subscription_id})")
                         # payment_logs 오류는 무시하고 성공 응답
                         conn.commit()
                         
@@ -273,43 +267,43 @@ async def complete_payment(
                             "plan_id": request.plan_id
                         }
                     
-                    print(f"🔄 커밋 시작...")
+                    logger.info(f"🔄 커밋 시작...")
                     conn.commit()
-                    print(f"✅ 커밋 완료")
+                    logger.info(f"✅ 커밋 완료")
                     
-                    print(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
-                    print(f"🎯 응답 생성 시작...")
+                    logger.info(f"✅ DB 저장 완료 - 구독 ID: {subscription_id}")
+                    logger.debug(f"🎯 응답 생성 시작...")
                     
-                    print(f"📝 plan 전체 값: {plan}")
-                    print(f"📝 plan 타입: {type(plan)}")
-                    print(f"📝 plan 길이: {len(plan) if plan else 'None'}")
+                    logger.debug(f"📝 plan 전체 값: {plan}")
+                    logger.debug(f"📝 plan 타입: {type(plan)}")
+                    logger.debug(f"📝 plan 길이: {len(plan) if plan else 'None'}")
                     
                     # plan 데이터 안전하게 출력 (인덱스 접근 제거)
                     if isinstance(plan, dict):
-                        print(f"📝 plan['name'] 값: {plan.get('name', 'N/A')}")
-                        print(f"📝 plan['id'] 값: {plan.get('id', 'N/A')}")
+                        logger.debug(f"📝 plan['name'] 값: {plan.get('name', 'N/A')}")
+                        logger.debug(f"📝 plan['id'] 값: {plan.get('id', 'N/A')}")
                     elif plan and len(plan) > 1:
-                        print(f"📝 plan[1] 값: {plan[1]}")
-                        print(f"📝 plan[1] 타입: {type(plan[1])}")
+                        logger.debug(f"📝 plan[1] 값: {plan[1]}")
+                        logger.debug(f"📝 plan[1] 타입: {type(plan[1])}")
                     else:
-                        print(f"❌ plan 데이터 부족: {plan}")
+                        logger.warning(f"❌ plan 데이터 부족: {plan}")
                     
-                    print(f"📝 request.paymentKey 값: {request.paymentKey}")
-                    print(f"📝 request.plan_id 값: {request.plan_id}")
+                    logger.debug(f"📝 request.paymentKey 값: {request.paymentKey}")
+                    logger.debug(f"📝 request.plan_id 값: {request.plan_id}")
                     
                     # 안전한 응답 생성 (plan 데이터 타입에 맞게 처리)
-                    print(f"🔄 응답 생성 시작...")
+                    logger.debug(f"🔄 응답 생성 시작...")
                     
                     # plan 데이터에서 요금제 이름 추출 (dict 또는 tuple 모두 지원)
                     if isinstance(plan, dict):
                         plan_name = plan.get('name', '요금제')
-                        print(f"✅ dict에서 plan_name 추출: {plan_name}")
+                        logger.debug(f"✅ dict에서 plan_name 추출: {plan_name}")
                     elif plan and len(plan) > 1:
                         plan_name = str(plan[1]) if plan[1] else '요금제'
-                        print(f"✅ tuple에서 plan_name 추출: {plan_name}")
+                        logger.debug(f"✅ tuple에서 plan_name 추출: {plan_name}")
                     else:
                         plan_name = '요금제'
-                        print(f"⚠️ 기본 plan_name 사용: {plan_name}")
+                        logger.warning(f"⚠️ 기본 plan_name 사용: {plan_name}")
                     
                     response_data = {
                         "success": True,
@@ -318,22 +312,13 @@ async def complete_payment(
                         "plan_id": request.plan_id
                     }
                     
-                    print(f"✅ response_data 생성 완료: {response_data}")
-                    print(f"🔄 return 시작...")
+                    logger.debug(f"✅ response_data 생성 완료: {response_data}")
+                    logger.debug(f"🔄 return 시작...")
                     return response_data
                     
                 except Exception as e:
                     conn.rollback()
-                    print(f"❌ DB 저장 오류: {e}")
-                    print(f"❌ Error type: {type(e).__name__}")
-                    if hasattr(e, 'args'):
-                        print(f"❌ Error args: {e.args}")
-                    if hasattr(e, 'errno'):
-                        print(f"❌ MySQL Error Code: {e.errno}")
-                    if hasattr(e, 'sqlstate'):
-                        print(f"❌ SQL State: {e.sqlstate}")
-                    import traceback
-                    print(f"❌ Stack trace:\n{traceback.format_exc()}")
+                    logger.exception(f"❌ DB 저장 오류: {e}")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=f"구독 정보 저장 중 오류가 발생했습니다: {str(e)} (Error Type: {type(e).__name__})"
@@ -342,9 +327,7 @@ async def complete_payment(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ 결제 완료 처리 오류: {e}")
-        import traceback
-        print(f"❌ 스택 트레이스: {traceback.format_exc()}")
+        logger.exception(f"❌ 결제 완료 처리 오류: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"결제 완료 처리 중 오류가 발생했습니다: {str(e)}"
@@ -385,7 +368,7 @@ async def get_payment_status(
                     }
                     
                 except Exception as e:
-                    print(f"❌ DB 조회 오류: {e}")
+                    logger.exception(f"❌ DB 조회 오류: {e}")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=f"결제 상태 조회 중 오류가 발생했습니다: {str(e)}"
@@ -394,8 +377,8 @@ async def get_payment_status(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ 결제 상태 조회 오류: {e}")
+        logger.exception(f"❌ 결제 상태 조회 오류: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"결제 상태 조회 중 오류가 발생했습니다: {str(e)}"
-        ) 
+        )

@@ -19,6 +19,27 @@ from src.utils.auth import (
 from src.utils.email import send_password_reset_email, send_email_verification_code
 from src.config.oauth import get_google_auth_url
 from src.utils.google_oauth import exchange_code_for_token, get_google_user_info, create_or_update_user_from_google
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 모듈 내 print 호출을 로거로 매핑합니다.
+# 규칙: '❌' 또는 '오류' 또는 'error' 포함 시 error, '⚠️' 포함 시 warning, 그 외 info
+
+def _auth_print(*args, sep=" ", end="\n"):
+    try:
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(map(str, args))
+    low = msg.lower()
+    if ("❌" in msg) or ("오류" in msg) or ("error" in low):
+        logger.error(msg)
+    elif "⚠️" in msg:
+        logger.warning(msg)
+    else:
+        logger.info(msg)
+
+print = _auth_print
 
 router = APIRouter(prefix="/api", tags=["auth"])
 class RefreshResponse(BaseModel):
