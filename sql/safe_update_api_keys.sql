@@ -67,3 +67,4 @@ CREATE TABLE IF NOT EXISTS captcha_tokens (
 
 -- 완료 메시지
 SELECT 'API 키 스키마 업데이트 완료' as status;
+

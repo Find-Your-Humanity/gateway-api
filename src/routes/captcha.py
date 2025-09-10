@@ -451,24 +451,23 @@ async def verify_handwriting(request: Request):
 @router.post("/verify-captcha")
 async def verify_captcha(request: Request):
     """
-    캡차 응답을 검증합니다. (서버용 - Secret Key 필요)
+    캡차 응답을 검증합니다. (공개 키만 사용 - 보안 강화)
     """
     try:
         # 요청 데이터 파싱
         request_data = await request.json()
-        api_key = request_data.get('site_key', '')  # API Key
-        secret_key = request_data.get('secret_key', '')  # Secret Key
+        api_key = request_data.get('site_key', '')  # 공개 키만
         captcha_response = request_data.get('response', '')
         captcha_token = request_data.get('captcha_token', '')  # 일회성 토큰
         
-        if not api_key or not secret_key:
-            raise HTTPException(status_code=401, detail="API key and secret key required")
+        if not api_key:
+            raise HTTPException(status_code=401, detail="API key required")
         
         if not captcha_token:
             raise HTTPException(status_code=400, detail="Captcha token required")
         
-        # API Key와 Secret Key 함께 검증
-        api_key_info = verify_api_key_with_secret(api_key, secret_key)
+        # 공개 키만으로 검증 (비밀 키는 서버에서 내부적으로 사용)
+        api_key_info = verify_api_key_only(api_key)
         
         # 사용량 제한 확인
         if not check_rate_limit(api_key_info):

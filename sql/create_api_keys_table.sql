@@ -22,3 +22,4 @@ CREATE TABLE IF NOT EXISTS api_keys (
     
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='API 키 관리';
+

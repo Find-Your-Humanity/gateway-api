@@ -4,6 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from src.routes.auth import router as auth_router
 from src.routes.dashboard import router as dashboard_router
+from src.routes.dashboard_router import router as dashboard_api_router
 from src.routes.admin import router as admin_router
 from src.routes.billing import router as billing_router
 from src.routes.api_keys import router as api_keys_router
@@ -31,6 +32,7 @@ app = FastAPI(title="Real Captcha Gateway API", version="1.0.0")
 # 라우터 등록
 app.include_router(auth_router)
 app.include_router(dashboard_router)
+app.include_router(dashboard_api_router)
 app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(api_keys_router)

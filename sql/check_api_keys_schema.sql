@@ -14,3 +14,4 @@ SELECT
 FROM information_schema.KEY_COLUMN_USAGE
 WHERE TABLE_SCHEMA = DATABASE()
 AND TABLE_NAME = 'api_keys';
+
