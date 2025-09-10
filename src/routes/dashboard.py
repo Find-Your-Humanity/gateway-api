@@ -249,6 +249,7 @@ def get_user_key_stats(
     period: Literal["daily", "weekly", "monthly"] = Query("daily"),
     api_type: Literal["all", "handwriting", "abstract", "imagecaptcha"] = Query("all"),
     api_key: Optional[str] = Query(None),
+    days: int = Query(7, ge=1, le=365),
     current_user = Depends(require_auth),
 ):
     """로그인 사용자의 API 키/타입별 사용량 (누락 구간 0 채움)
@@ -277,9 +278,11 @@ def get_user_key_stats(
                     params.append(api_key)
 
                 if period == "daily":
-                    start_date = today - timedelta(days=6)
+                    # 최근 N일 데이터 (기본 7일, 최대 365일)
+                    safe_days = max(1, min(int(days), 365))
+                    start_date = today - timedelta(days=safe_days - 1)
                     # 0 채움용 라벨 테이블 생성
-                    days = [today - timedelta(days=i) for i in range(6, -1, -1)]
+                    days_list = [today - timedelta(days=i) for i in range(safe_days - 1, -1, -1)]
                     # 파라미터 순서: user_id, start_date, (api_type?), (api_key?)
                     base_sql = f"""
                         SELECT date, 
@@ -299,7 +302,7 @@ def get_user_key_stats(
                         bind_params.append(api_key)
                     cursor.execute(base_sql, bind_params)
                     rows = {r["date"]: r for r in (cursor.fetchall() or [])}
-                    for d in days:
+                    for d in days_list:
                         r = rows.get(d)
                         if r:
                             total = int(r.get("total", 0))
