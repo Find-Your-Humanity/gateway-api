@@ -203,8 +203,8 @@ def get_dashboard_stats(
                         ORDER BY week_start
                     """, (user_id, start_date))
                 else:  # monthly
-                    # 최근 12개월 데이터
-                    start_date = datetime.now().date() - timedelta(days=365)
+                    # 최근 90일 데이터(최대 약 3개월)
+                    start_date = datetime.now().date() - timedelta(days=90)
                     cursor.execute("""
                         SELECT 
                             DATE_FORMAT(date, '%%Y-%%m') as month,
