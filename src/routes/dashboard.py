@@ -203,17 +203,21 @@ def get_dashboard_stats(
                 elif period == "weekly":
                     # 최근 4주 데이터
                     start_date = datetime.now().date() - timedelta(weeks=3)
+                    # 주간 라벨을 "M월 N주차"로 생성하기 위해 주 시작일을 함께 조회
                     cursor.execute("""
                         SELECT 
-                            YEARWEEK(date) as week,
+                            YEARWEEK(date, 3) as yw,
+                            MIN(date) as week_start,
+                            MONTH(MIN(date)) AS month_num,
+                            FLOOR((DAYOFMONTH(MIN(date)) - 1) / 7) + 1 AS week_in_month,
                             SUM(total_requests) as total_requests,
                             SUM(successful_requests) as successful_requests,
                             SUM(failed_requests) as failed_requests,
                             AVG(avg_response_time) as avg_response_time
                         FROM daily_user_api_stats
                         WHERE user_id = %s AND date >= %s
-                        GROUP BY YEARWEEK(date)
-                        ORDER BY week
+                        GROUP BY YEARWEEK(date, 3)
+                        ORDER BY week_start
                     """, (user_id, start_date))
                 else:  # monthly
                     # 최근 12개월 데이터
@@ -231,7 +235,24 @@ def get_dashboard_stats(
                         ORDER BY month
                     """, (user_id, start_date))
                 
-                stats_data = cursor.fetchall()
+                rows = cursor.fetchall()
+                # 주간의 경우 프론트에서 바로 사용할 수 있도록 "date" 라벨을 추가 변환
+                if period == "weekly":
+                    stats_data = []
+                    for r in rows or []:
+                        try:
+                            label = f"{int(r['month_num'])}월 {int(r['week_in_month'])}주차"
+                        except Exception:
+                            label = f"W{r.get('yw', '')}"
+                        stats_data.append({
+                            "date": label,
+                            "total_requests": int(r.get("total_requests", 0)),
+                            "successful_requests": int(r.get("successful_requests", 0)),
+                            "failed_requests": int(r.get("failed_requests", 0)),
+                            "avg_response_time": float(r.get("avg_response_time", 0) or 0.0),
+                        })
+                else:
+                    stats_data = rows
                 
                 return {
                     "success": True,
