@@ -57,9 +57,8 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                 if not plan_info:
                     raise HTTPException(status_code=404, detail="사용자 플랜 정보를 찾을 수 없습니다")
                 
-                # 2. 이번 달 API 사용량 조회 (캡차 타입별) - 월간 구독 서비스에 맞게 변경
+                # 2. 오늘의 API 사용량 조회 (캡차 타입별)
                 today = datetime.now().date()
-                month_start = today.replace(day=1)
                 cursor.execute("""
                     SELECT 
                         api_type,
@@ -68,13 +67,14 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                         SUM(failed_requests) as failed_requests,
                         AVG(avg_response_time) as avg_response_time
                     FROM daily_user_api_stats
-                    WHERE user_id = %s AND date >= %s
+                    WHERE user_id = %s AND date = %s
                     GROUP BY api_type
-                """, (user_id, month_start))
+                """, (user_id, today))
                 
-                monthly_stats_by_type = cursor.fetchall()
+                today_stats = cursor.fetchall()
                 
                 # 3. 이번 달 총 사용량 조회
+                month_start = today.replace(day=1)
                 cursor.execute("""
                     SELECT 
                         SUM(total_requests) as total_requests,
@@ -96,7 +96,7 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                 }
                 
                 total_requests = 0
-                for stat in monthly_stats_by_type:
+                for stat in today_stats:
                     api_type = stat['api_type']
                     requests = stat['total_requests'] or 0
                     total_requests += requests
@@ -134,12 +134,12 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                             "current_usage": current_usage,
                             "usage_percentage": round(credit_usage_percentage, 1)
                         },
-                        "monthly_stats": {
+                        "today_stats": {
                             "total_requests": total_requests,
-                            "successful_requests": sum(stat['successful_requests'] or 0 for stat in monthly_stats_by_type),
-                            "failed_requests": sum(stat['failed_requests'] or 0 for stat in monthly_stats_by_type),
-                            "success_rate": round((sum(stat['successful_requests'] or 0 for stat in monthly_stats_by_type) / total_requests * 100), 1) if total_requests > 0 else 0,
-                            "avg_response_time": round(sum(stat['avg_response_time'] or 0 for stat in monthly_stats_by_type) / len(monthly_stats_by_type), 2) if monthly_stats_by_type else 0
+                            "successful_requests": sum(stat['successful_requests'] or 0 for stat in today_stats),
+                            "failed_requests": sum(stat['failed_requests'] or 0 for stat in today_stats),
+                            "success_rate": round((sum(stat['successful_requests'] or 0 for stat in today_stats) / total_requests * 100), 1) if total_requests > 0 else 0,
+                            "avg_response_time": round(sum(stat['avg_response_time'] or 0 for stat in today_stats) / len(today_stats), 2) if today_stats else 0
                         },
                         "captcha_stats": captcha_stats,
                         "level_stats": level_stats
