@@ -324,6 +324,7 @@ def get_user_key_stats(
                     start_date = today - timedelta(days=28)
                     base_sql = f"""
                         SELECT YEARWEEK(date, 3) AS yw,
+                               MIN(date) AS week_start,
                                SUM(total_requests) AS total,
                                SUM(successful_requests) AS success,
                                SUM(failed_requests) AS failed
@@ -344,13 +345,23 @@ def get_user_key_stats(
                         success = int(r.get("success", 0))
                         failed = int(r.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
+                        # 라벨을 "M월 N주차"로 변환 (주간의 시작일 기준)
+                        try:
+                            ws = r["week_start"]
+                            # week_start는 date 객체로 들어옴
+                            month = ws.month
+                            day = ws.day
+                            week_in_month = ( (day - 1) // 7 ) + 1
+                            label = f"{month}월 {week_in_month}주차"
+                        except Exception:
+                            label = f"W{r['yw']}"
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
-                            "date": f"W{r['yw']}",
+                            "date": label,
                         })
 
                 else:  # monthly
