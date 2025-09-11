@@ -1892,15 +1892,15 @@ def get_realtime_monitoring(request: Request):
                 # 1. API 상태 (각 엔드포인트별 최근 상태)
                 cursor.execute("""
                     SELECT 
-                        endpoint,
+                        path as endpoint,
                         COUNT(*) as total_requests,
                         COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_count,
                         COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
                         COALESCE(AVG(response_time), 0) as avg_response_time,
-                        MAX(request_time) as last_request_time
+                        MAX(created_at) as last_request_time
                     FROM request_logs 
-                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
-                    GROUP BY endpoint
+                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    GROUP BY path
                     ORDER BY total_requests DESC
                 """)
                 api_status = []
@@ -1920,13 +1920,13 @@ def get_realtime_monitoring(request: Request):
                 # 2. 응답 시간 분포 (최근 1시간, 5분 단위)
                 cursor.execute("""
                     SELECT 
-                        DATE_FORMAT(request_time, '%Y-%m-%d %H:%i') as time_bucket,
+                        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
                         COALESCE(AVG(response_time), 0) as avg_response_time,
                         COALESCE(MAX(response_time), 0) as max_response_time,
                         COALESCE(MIN(response_time), 0) as min_response_time,
                         COUNT(*) as request_count
                     FROM request_logs 
-                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
                     GROUP BY time_bucket
                     ORDER BY time_bucket DESC
                     LIMIT 12
@@ -1945,11 +1945,11 @@ def get_realtime_monitoring(request: Request):
                 # 3. 에러율 (최근 1시간, 5분 단위)
                 cursor.execute("""
                     SELECT 
-                        DATE_FORMAT(request_time, '%Y-%m-%d %H:%i') as time_bucket,
+                        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
                         COUNT(*) as total_requests,
                         COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count
                     FROM request_logs 
-                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
                     GROUP BY time_bucket
                     ORDER BY time_bucket DESC
                     LIMIT 12
@@ -1968,10 +1968,10 @@ def get_realtime_monitoring(request: Request):
                 # 4. TPS (Transactions Per Second) - 최근 1시간, 1분 단위
                 cursor.execute("""
                     SELECT 
-                        DATE_FORMAT(request_time, '%Y-%m-%d %H:%i') as time_bucket,
+                        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
                         COUNT(*) as request_count
                     FROM request_logs 
-                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
                     GROUP BY time_bucket
                     ORDER BY time_bucket DESC
                     LIMIT 60
@@ -1993,7 +1993,7 @@ def get_realtime_monitoring(request: Request):
                         COALESCE(AVG(response_time), 0) as avg_response_time_1h,
                         COUNT(DISTINCT user_id) as unique_users_1h
                     FROM request_logs 
-                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
                 """)
                 summary = cursor.fetchone()
                 
