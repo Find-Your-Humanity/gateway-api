@@ -2133,17 +2133,28 @@ async def get_plan_distribution(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 요금제별 사용자 분포 조회
+                # 요금제별 사용자/매출 분포 조회 (중복 제거, 월간 매출 집계)
                 cursor.execute("""
                     SELECT 
-                        p.display_name as name,
+                        p.display_name AS name,
                         p.price,
-                        COUNT(u.id) as users,
-                        SUM(COALESCE(pl.amount, 0)) as revenue
+                        COALESCE(u_stats.user_count, 0) AS users,
+                        COALESCE(r_stats.revenue, 0) AS revenue
                     FROM plans p
-                    LEFT JOIN users u ON p.id = u.plan_id
-                    LEFT JOIN payment_logs pl ON u.id = pl.user_id AND pl.status = 'completed'
-                    GROUP BY p.id, p.display_name, p.price
+                    LEFT JOIN (
+                        SELECT plan_id, COUNT(*) AS user_count
+                        FROM users
+                        WHERE is_active = 1 OR is_active = TRUE
+                        GROUP BY plan_id
+                    ) u_stats ON u_stats.plan_id = p.id
+                    LEFT JOIN (
+                        SELECT u.plan_id, SUM(pl.amount) AS revenue
+                        FROM payment_logs pl
+                        JOIN users u ON pl.user_id = u.id
+                        WHERE pl.status = 'completed'
+                          AND DATE_FORMAT(pl.created_at, '%%Y-%%m') = DATE_FORMAT(NOW(), '%%Y-%%m')
+                        GROUP BY u.plan_id
+                    ) r_stats ON r_stats.plan_id = p.id
                     ORDER BY users DESC
                 """)
                 
