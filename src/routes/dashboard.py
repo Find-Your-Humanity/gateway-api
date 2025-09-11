@@ -486,10 +486,16 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 }
                 
                 # 리셋 시간 계산
+                next_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                if next_month.month == 12:
+                    next_month = next_month.replace(year=next_month.year + 1, month=1)
+                else:
+                    next_month = next_month.replace(month=next_month.month + 1)
+                
                 reset_times = {
                     "perMinute": now.replace(second=0, microsecond=0) + timedelta(minutes=1),
                     "perDay": now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1),
-                    "perMonth": now.replace(day=1, hour=0, minute=0, second=0, microsecond=0) + timedelta(days=32).replace(day=1)
+                    "perMonth": next_month
                 }
                 
                 # 상태 판단
