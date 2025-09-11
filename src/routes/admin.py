@@ -70,6 +70,25 @@ async def public_next_captcha_proxy(request: Request):
 async def public_next_captcha_proxy_alias(request: Request):
     return await public_next_captcha_proxy(request)
 
+# CORS 프리플라이트(OPTIONS) 및 HEAD 요청 허용
+from fastapi import Response
+
+@router.options("/public/next-captcha", include_in_schema=False)
+async def public_next_captcha_options():
+    return Response(status_code=200)
+
+@router.head("/public/next-captcha", include_in_schema=False)
+async def public_next_captcha_head():
+    return Response(status_code=200)
+
+@router.options("/public/api/next-captcha", include_in_schema=False)
+async def public_next_captcha_alias_options():
+    return Response(status_code=200)
+
+@router.head("/public/api/next-captcha", include_in_schema=False)
+async def public_next_captcha_alias_head():
+    return Response(status_code=200)
+
 # Pydantic 모델들
 class UserResponse(BaseModel):
     id: int
