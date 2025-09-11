@@ -1516,8 +1516,13 @@ def get_request_statistics(
                         AVG(response_time) as avg_response_time,
                         COUNT(DISTINCT user_id) as unique_users,
                         COUNT(DISTINCT api_key) as unique_api_keys
-                    FROM request_logs
-                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                    FROM (
+                        SELECT status_code, response_time, user_id, api_key FROM request_logs
+                        WHERE request_time >= NOW() - INTERVAL {days} DAY
+                        UNION ALL
+                        SELECT status_code, response_time, user_id, api_key FROM api_request_logs
+                        WHERE created_at >= NOW() - INTERVAL {days} DAY
+                    ) as combined_logs
                 """
                 cursor.execute(stats_query)
                 stats = cursor.fetchone()
@@ -1584,8 +1589,14 @@ def get_request_logs(
                 
                 where_clause = " AND ".join(where_conditions)
                 
-                # 전체 개수 조회
-                count_query = f"SELECT COUNT(*) as total FROM request_logs WHERE {where_clause}"
+                # 전체 개수 조회 - 통합 로그 테이블 사용
+                count_query = f"""
+                    SELECT COUNT(*) as total FROM (
+                        SELECT * FROM request_logs WHERE {where_clause}
+                        UNION ALL
+                        SELECT * FROM api_request_logs WHERE {where_clause.replace('request_time', 'created_at')}
+                    ) as combined_logs
+                """
                 cursor.execute(count_query, params)
                 total_count = cursor.fetchone()["total"]
                 
@@ -1595,21 +1606,26 @@ def get_request_logs(
                 # 로그 데이터 조회
                 logs_query = f"""
                     SELECT 
-                        rl.id,
-                        rl.user_id,
-                        rl.api_key,
-                        rl.path,
-                        rl.method,
-                        rl.status_code,
-                        rl.response_time,
-                        rl.user_agent,
-                        rl.request_time,
+                        combined_logs.id,
+                        combined_logs.user_id,
+                        combined_logs.api_key,
+                        combined_logs.path,
+                        combined_logs.method,
+                        combined_logs.status_code,
+                        combined_logs.response_time,
+                        combined_logs.user_agent,
+                        combined_logs.request_time,
                         u.email as user_email,
                         u.username as user_username
-                    FROM request_logs rl
-                    LEFT JOIN users u ON rl.user_id = u.id
-                    WHERE {where_clause}
-                    ORDER BY rl.request_time DESC
+                    FROM (
+                        SELECT id, user_id, api_key, path, method, status_code, response_time, user_agent, request_time FROM request_logs
+                        WHERE {where_clause}
+                        UNION ALL
+                        SELECT id, user_id, api_key, path, method, status_code, response_time, NULL as user_agent, created_at as request_time FROM api_request_logs
+                        WHERE {where_clause.replace('request_time', 'created_at')}
+                    ) as combined_logs
+                    LEFT JOIN users u ON combined_logs.user_id = u.id
+                    ORDER BY combined_logs.request_time DESC
                     LIMIT %s OFFSET %s
                 """
                 
@@ -1663,11 +1679,16 @@ def get_error_statistics(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 전체 요청 수 조회
+                # 전체 요청 수 조회 - 통합 로그 테이블 사용
                 total_query = f"""
                     SELECT COUNT(*) as total
-                    FROM request_logs
-                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                    FROM (
+                        SELECT * FROM request_logs
+                        WHERE request_time >= NOW() - INTERVAL {days} DAY
+                        UNION ALL
+                        SELECT * FROM api_request_logs
+                        WHERE created_at >= NOW() - INTERVAL {days} DAY
+                    ) as combined_logs
                 """
                 cursor.execute(total_query)
                 total_requests = cursor.fetchone()["total"]
@@ -1675,14 +1696,19 @@ def get_error_statistics(
                 if total_requests == 0:
                     return {"error_stats": []}
                 
-                # 오류별 통계 조회
+                # 오류별 통계 조회 - 통합 로그 테이블 사용
                 error_query = f"""
                     SELECT 
                         status_code,
                         COUNT(*) as count
-                    FROM request_logs
-                    WHERE request_time >= NOW() - INTERVAL {days} DAY
-                        AND status_code >= 400
+                    FROM (
+                        SELECT status_code FROM request_logs
+                        WHERE request_time >= NOW() - INTERVAL {days} DAY
+                        UNION ALL
+                        SELECT status_code FROM api_request_logs
+                        WHERE created_at >= NOW() - INTERVAL {days} DAY
+                    ) as combined_logs
+                    WHERE status_code >= 400
                     GROUP BY status_code
                     ORDER BY count DESC
                 """
@@ -1732,18 +1758,28 @@ def get_admin_dashboard_metrics(request: Request):
                 # 3. 현재 활성 사용자 (최근 1시간 내 요청한 사용자)
                 cursor.execute("""
                     SELECT COUNT(DISTINCT user_id) as active_users
-                    FROM request_logs 
-                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
-                    AND user_id IS NOT NULL
+                    FROM (
+                        SELECT user_id FROM request_logs 
+                        WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                        AND user_id IS NOT NULL
+                        UNION ALL
+                        SELECT user_id FROM api_request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                        AND user_id IS NOT NULL
+                    ) as combined_logs
                 """)
                 active_users = cursor.fetchone()["active_users"] or 0
                 
-                # 4. 총 요청 수 및 성공률
+                # 4. 총 요청 수 및 성공률 - 통합 로그 테이블 사용
                 cursor.execute("""
                     SELECT 
                         COUNT(*) as total_requests,
                         COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_count
-                    FROM request_logs
+                    FROM (
+                        SELECT status_code FROM request_logs
+                        UNION ALL
+                        SELECT status_code FROM api_request_logs
+                    ) as combined_logs
                 """)
                 request_stats = cursor.fetchone()
                 total_requests = request_stats["total_requests"] or 0
@@ -1841,11 +1877,16 @@ def get_endpoint_usage(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 전체 요청 수 조회
+                # 전체 요청 수 조회 - 통합 로그 테이블 사용
                 total_query = f"""
                     SELECT COUNT(*) as total
-                    FROM request_logs
-                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                    FROM (
+                        SELECT * FROM request_logs
+                        WHERE request_time >= NOW() - INTERVAL {days} DAY
+                        UNION ALL
+                        SELECT * FROM api_request_logs
+                        WHERE created_at >= NOW() - INTERVAL {days} DAY
+                    ) as combined_logs
                 """
                 cursor.execute(total_query)
                 total_requests = cursor.fetchone()["total"]
@@ -1853,14 +1894,19 @@ def get_endpoint_usage(
                 if total_requests == 0:
                     return {"endpoint_usage": []}
                 
-                # 엔드포인트별 사용량 조회
+                # 엔드포인트별 사용량 조회 - 통합 로그 테이블 사용
                 usage_query = f"""
                     SELECT 
                         path as endpoint,
                         COUNT(*) as requests,
                         AVG(response_time) as avg_response_time
-                    FROM request_logs
-                    WHERE request_time >= NOW() - INTERVAL {days} DAY
+                    FROM (
+                        SELECT path, response_time FROM request_logs
+                        WHERE request_time >= NOW() - INTERVAL {days} DAY
+                        UNION ALL
+                        SELECT path, response_time FROM api_request_logs
+                        WHERE created_at >= NOW() - INTERVAL {days} DAY
+                    ) as combined_logs
                     GROUP BY path
                     ORDER BY requests DESC
                     LIMIT 20
