@@ -1889,7 +1889,7 @@ def get_realtime_monitoring(request: Request):
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 1. API 상태 (각 엔드포인트별 최근 상태)
+                # 1. API 상태 (각 엔드포인트별 최근 상태) - 두 로그 테이블 통합
                 cursor.execute("""
                     SELECT 
                         path as endpoint,
@@ -1898,8 +1898,13 @@ def get_realtime_monitoring(request: Request):
                         COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
                         COALESCE(AVG(response_time), 0) as avg_response_time,
                         MAX(created_at) as last_request_time
-                    FROM request_logs 
-                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    FROM (
+                        SELECT path, status_code, response_time, created_at FROM request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                        UNION ALL
+                        SELECT path, status_code, response_time, created_at FROM api_request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    ) as combined_logs
                     GROUP BY path
                     ORDER BY total_requests DESC
                 """)
@@ -1917,7 +1922,7 @@ def get_realtime_monitoring(request: Request):
                         "status": "healthy" if success_rate >= 95 else "warning" if success_rate >= 80 else "critical"
                     })
                 
-                # 2. 응답 시간 분포 (최근 1시간, 5분 단위)
+                # 2. 응답 시간 분포 (최근 1시간, 5분 단위) - 두 로그 테이블 통합
                 cursor.execute("""
                     SELECT 
                         DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
@@ -1925,8 +1930,13 @@ def get_realtime_monitoring(request: Request):
                         COALESCE(MAX(response_time), 0) as max_response_time,
                         COALESCE(MIN(response_time), 0) as min_response_time,
                         COUNT(*) as request_count
-                    FROM request_logs 
-                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    FROM (
+                        SELECT response_time, created_at FROM request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                        UNION ALL
+                        SELECT response_time, created_at FROM api_request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    ) as combined_logs
                     GROUP BY time_bucket
                     ORDER BY time_bucket DESC
                     LIMIT 12
@@ -1942,14 +1952,19 @@ def get_realtime_monitoring(request: Request):
                     })
                 response_time_data.reverse()  # 시간순으로 정렬
                 
-                # 3. 에러율 (최근 1시간, 5분 단위)
+                # 3. 에러율 (최근 1시간, 5분 단위) - 두 로그 테이블 통합
                 cursor.execute("""
                     SELECT 
                         DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
                         COUNT(*) as total_requests,
                         COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count
-                    FROM request_logs 
-                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    FROM (
+                        SELECT status_code, created_at FROM request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                        UNION ALL
+                        SELECT status_code, created_at FROM api_request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    ) as combined_logs
                     GROUP BY time_bucket
                     ORDER BY time_bucket DESC
                     LIMIT 12
@@ -1965,13 +1980,18 @@ def get_realtime_monitoring(request: Request):
                     })
                 error_rate_data.reverse()  # 시간순으로 정렬
                 
-                # 4. TPS (Transactions Per Second) - 최근 1시간, 1분 단위
+                # 4. TPS (Transactions Per Second) - 최근 1시간, 1분 단위 - 두 로그 테이블 통합
                 cursor.execute("""
                     SELECT 
                         DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
                         COUNT(*) as request_count
-                    FROM request_logs 
-                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    FROM (
+                        SELECT created_at FROM request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                        UNION ALL
+                        SELECT created_at FROM api_request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    ) as combined_logs
                     GROUP BY time_bucket
                     ORDER BY time_bucket DESC
                     LIMIT 60
@@ -1984,7 +2004,7 @@ def get_realtime_monitoring(request: Request):
                     })
                 tps_data.reverse()  # 시간순으로 정렬
                 
-                # 5. 전체 시스템 상태 요약
+                # 5. 전체 시스템 상태 요약 - 두 로그 테이블 통합
                 cursor.execute("""
                     SELECT 
                         COUNT(*) as total_requests_1h,
@@ -1992,8 +2012,13 @@ def get_realtime_monitoring(request: Request):
                         COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_requests_1h,
                         COALESCE(AVG(response_time), 0) as avg_response_time_1h,
                         COUNT(DISTINCT user_id) as unique_users_1h
-                    FROM request_logs 
-                    WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    FROM (
+                        SELECT status_code, response_time, user_id FROM request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                        UNION ALL
+                        SELECT status_code, response_time, user_id FROM api_request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                    ) as combined_logs
                 """)
                 summary = cursor.fetchone()
                 
