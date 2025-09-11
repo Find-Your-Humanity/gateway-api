@@ -1752,6 +1752,15 @@ def get_admin_dashboard_metrics(request: Request):
                 revenue = cursor.fetchone()["revenue"]
                 
                 # 6. 플랜별 사용자 분포
+                # 먼저 모든 플랜 조회
+                cursor.execute("""
+                    SELECT id, display_name, name
+                    FROM plans
+                    ORDER BY id
+                """)
+                all_plans = cursor.fetchall()
+                
+                # 각 플랜별 사용자 수 조회
                 cursor.execute("""
                     SELECT 
                         p.display_name as plan_name,
@@ -1759,13 +1768,11 @@ def get_admin_dashboard_metrics(request: Request):
                     FROM users u
                     LEFT JOIN plans p ON u.plan_id = p.id
                     GROUP BY p.id, p.display_name
-                    ORDER BY user_count DESC
                 """)
-                plan_distribution_raw = cursor.fetchall()
+                plan_user_counts = {row["plan_name"] or "Free": row["user_count"] for row in cursor.fetchall()}
                 
-                # 플랜별 분포 계산
-                plan_distribution = []
-                total_users_for_distribution = sum(row["user_count"] for row in plan_distribution_raw)
+                # 전체 사용자 수 계산
+                total_users_for_distribution = sum(plan_user_counts.values())
                 
                 # 플랜별 색상 매핑
                 plan_colors = {
@@ -1777,9 +1784,11 @@ def get_admin_dashboard_metrics(request: Request):
                     "Plus": "#2e7d32"
                 }
                 
-                for row in plan_distribution_raw:
-                    plan_name = row["plan_name"] or "Free"
-                    user_count = row["user_count"]
+                # 모든 플랜에 대해 분포 계산 (사용자가 없는 플랜도 0%로 표시)
+                plan_distribution = []
+                for plan in all_plans:
+                    plan_name = plan["display_name"] or plan["name"] or "Free"
+                    user_count = plan_user_counts.get(plan_name, 0)
                     percentage = (user_count / total_users_for_distribution * 100) if total_users_for_distribution > 0 else 0
                     
                     plan_distribution.append({
@@ -1788,6 +1797,9 @@ def get_admin_dashboard_metrics(request: Request):
                         "count": user_count,
                         "color": plan_colors.get(plan_name, "#1976d2")
                     })
+                
+                # 사용자 수 기준으로 정렬
+                plan_distribution.sort(key=lambda x: x["count"], reverse=True)
                 
                 return {
                     "success": True,
