@@ -60,10 +60,10 @@ def get_api_status_query(time_filter: str = "NOW() - INTERVAL 1 HOUR") -> str:
             COALESCE(AVG(response_time), 0) as avg_response_time,
             MAX(request_time) as last_request_time
         FROM (
-            SELECT path COLLATE utf8mb4_unicode_ci as path, status_code, response_time, request_time FROM request_logs 
+            SELECT CAST(path AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as path, status_code, response_time, request_time FROM request_logs 
             WHERE request_time >= {time_filter}
             UNION ALL
-            SELECT path COLLATE utf8mb4_unicode_ci as path, status_code, response_time, created_at as request_time FROM api_request_logs 
+            SELECT CAST(path AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as path, status_code, response_time, created_at as request_time FROM api_request_logs 
             WHERE created_at >= {time_filter}
         ) as combined_logs
         GROUP BY path
