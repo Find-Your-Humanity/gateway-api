@@ -2078,3 +2078,245 @@ def get_realtime_monitoring(request: Request):
     except Exception as e:
         logger.error(f"실시간 모니터링 데이터 조회 실패: {e}")
         raise HTTPException(status_code=500, detail="실시간 모니터링 데이터 조회에 실패했습니다")
+
+
+@router.get("/admin/system-stats")
+async def get_system_stats(
+    days: int = Query(7, description="조회할 일수 (기본값: 7일)"),
+    current_user: dict = Depends(get_current_user_from_request)
+):
+    """
+    시스템 통계 데이터 조회 (일별 요청 수, 성공/실패, 활성 사용자)
+    """
+    try:
+        # 관리자 권한 확인
+        if not current_user.get('is_admin'):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 일별 시스템 통계 조회 (간단한 버전)
+                cursor.execute("""
+                    SELECT 
+                        DATE(request_time) as date,
+                        COUNT(*) as total_requests,
+                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as successful_requests,
+                        SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed_requests,
+                        COUNT(DISTINCT user_id) as active_users
+                    FROM request_logs 
+                    WHERE request_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
+                    GROUP BY DATE(request_time)
+                    
+                    UNION ALL
+                    
+                    SELECT 
+                        DATE(created_at) as date,
+                        COUNT(*) as total_requests,
+                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as successful_requests,
+                        SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed_requests,
+                        COUNT(DISTINCT user_id) as active_users
+                    FROM api_request_logs 
+                    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
+                    GROUP BY DATE(created_at)
+                    
+                    ORDER BY date DESC
+                """, (days, days))
+                
+                stats = cursor.fetchall()
+                
+                # 데이터 포맷팅
+                formatted_stats = []
+                for stat in stats:
+                    formatted_stats.append({
+                        "date": stat['date'].strftime('%Y-%m-%d'),
+                        "totalRequests": stat['total_requests'],
+                        "successfulRequests": stat['successful_requests'],
+                        "failedRequests": stat['failed_requests'],
+                        "activeUsers": stat['active_users']
+                    })
+                
+                return {
+                    "success": True,
+                    "data": formatted_stats
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"시스템 통계 데이터 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="시스템 통계 데이터를 불러올 수 없습니다.")
+
+
+@router.get("/admin/user-growth")
+async def get_user_growth(
+    months: int = Query(6, description="조회할 월수 (기본값: 6개월)"),
+    current_user: dict = Depends(get_current_user_from_request)
+):
+    """
+    사용자 증가 데이터 조회 (월별 신규 사용자, 총 사용자)
+    """
+    try:
+        # 관리자 권한 확인
+        if not current_user.get('is_admin'):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 월별 사용자 증가 데이터 조회
+                cursor.execute("""
+                    SELECT 
+                        DATE_FORMAT(created_at, '%Y-%m') as month,
+                        COUNT(*) as new_users,
+                        SUM(COUNT(*)) OVER (ORDER BY DATE_FORMAT(created_at, '%Y-%m')) as total_users
+                    FROM users 
+                    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)
+                    GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+                    ORDER BY month ASC
+                """, (months,))
+                
+                growth_data = cursor.fetchall()
+                
+                # 데이터 포맷팅
+                formatted_data = []
+                for data in growth_data:
+                    month_name = data['month'].split('-')[1] + '월'
+                    formatted_data.append({
+                        "month": month_name,
+                        "newUsers": data['new_users'],
+                        "totalUsers": data['total_users']
+                    })
+                
+                return {
+                    "success": True,
+                    "data": formatted_data
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"사용자 증가 데이터 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="사용자 증가 데이터를 불러올 수 없습니다.")
+
+
+@router.get("/admin/plan-distribution")
+async def get_plan_distribution(
+    current_user: dict = Depends(get_current_user_from_request)
+):
+    """
+    요금제 분포 데이터 조회 (요금제별 사용자 수, 수익)
+    """
+    try:
+        # 관리자 권한 확인
+        if not current_user.get('is_admin'):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 요금제별 사용자 분포 조회
+                cursor.execute("""
+                    SELECT 
+                        p.display_name as name,
+                        p.price,
+                        COUNT(u.id) as users,
+                        SUM(COALESCE(pl.amount, 0)) as revenue
+                    FROM plans p
+                    LEFT JOIN users u ON p.id = u.plan_id
+                    LEFT JOIN payment_logs pl ON u.id = pl.user_id AND pl.status = 'completed'
+                    GROUP BY p.id, p.display_name, p.price
+                    ORDER BY users DESC
+                """)
+                
+                plan_data = cursor.fetchall()
+                
+                # 총 사용자 수 계산
+                total_users = sum(plan['users'] for plan in plan_data)
+                
+                # 데이터 포맷팅
+                formatted_data = []
+                for plan in plan_data:
+                    percentage = (plan['users'] / total_users * 100) if total_users > 0 else 0
+                    formatted_data.append({
+                        "name": plan['name'],
+                        "value": round(percentage, 1),
+                        "users": plan['users'],
+                        "revenue": float(plan['revenue']) if plan['revenue'] else 0
+                    })
+                
+                return {
+                    "success": True,
+                    "data": formatted_data
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"요금제 분포 데이터 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="요금제 분포 데이터를 불러올 수 없습니다.")
+
+
+@router.get("/admin/error-stats")
+async def get_error_stats(
+    days: int = Query(7, description="조회할 일수 (기본값: 7일)"),
+    current_user: dict = Depends(get_current_user_from_request)
+):
+    """
+    에러 통계 데이터 조회 (에러 타입별 발생 횟수, 비율)
+    """
+    try:
+        # 관리자 권한 확인
+        if not current_user.get('is_admin'):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 에러 통계 조회
+                cursor.execute("""
+                    SELECT 
+                        CASE 
+                            WHEN status_code = 408 THEN '타임아웃'
+                            WHEN status_code = 400 THEN '잘못된 입력'
+                            WHEN status_code = 500 THEN '서버 오류'
+                            WHEN status_code = 503 THEN '서비스 불가'
+                            WHEN status_code BETWEEN 400 AND 499 THEN '클라이언트 오류'
+                            WHEN status_code BETWEEN 500 AND 599 THEN '서버 오류'
+                            ELSE '기타 오류'
+                        END as error_type,
+                        COUNT(*) as count
+                    FROM (
+                        SELECT status_code FROM request_logs 
+                        WHERE request_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY) 
+                        AND status_code >= 400
+                        UNION ALL
+                        SELECT status_code FROM api_request_logs 
+                        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL %s DAY) 
+                        AND status_code >= 400
+                    ) as error_logs
+                    GROUP BY error_type
+                    ORDER BY count DESC
+                """, (days, days))
+                
+                error_data = cursor.fetchall()
+                
+                # 총 에러 수 계산
+                total_errors = sum(error['count'] for error in error_data)
+                
+                # 데이터 포맷팅
+                formatted_data = []
+                for error in error_data:
+                    percentage = (error['count'] / total_errors * 100) if total_errors > 0 else 0
+                    formatted_data.append({
+                        "type": error['error_type'],
+                        "count": error['count'],
+                        "percentage": round(percentage, 1)
+                    })
+                
+                return {
+                    "success": True,
+                    "data": formatted_data
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"에러 통계 데이터 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="에러 통계 데이터를 불러올 수 없습니다.")
