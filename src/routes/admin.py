@@ -1877,3 +1877,150 @@ def get_endpoint_usage(
     except Exception as e:
         logger.error(f"Error fetching endpoint usage: {e}")
         raise HTTPException(status_code=500, detail=f"엔드포인트 사용량 조회 실패: {str(e)}")
+
+
+@router.get("/admin/realtime-monitoring")
+def get_realtime_monitoring(request: Request):
+    """실시간 모니터링 데이터 조회"""
+    try:
+        current_user = get_current_user_from_request(request)
+        if not current_user or not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 1. API 상태 (각 엔드포인트별 최근 상태)
+                cursor.execute("""
+                    SELECT 
+                        endpoint,
+                        COUNT(*) as total_requests,
+                        COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_count,
+                        COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
+                        COALESCE(AVG(response_time), 0) as avg_response_time,
+                        MAX(request_time) as last_request_time
+                    FROM request_logs 
+                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    GROUP BY endpoint
+                    ORDER BY total_requests DESC
+                """)
+                api_status = []
+                for row in cursor.fetchall():
+                    success_rate = (row["success_count"] / row["total_requests"] * 100) if row["total_requests"] > 0 else 0
+                    api_status.append({
+                        "endpoint": row["endpoint"],
+                        "total_requests": row["total_requests"],
+                        "success_count": row["success_count"],
+                        "error_count": row["error_count"],
+                        "success_rate": round(success_rate, 2),
+                        "avg_response_time": round(row["avg_response_time"], 2),
+                        "last_request_time": row["last_request_time"].isoformat() if row["last_request_time"] else None,
+                        "status": "healthy" if success_rate >= 95 else "warning" if success_rate >= 80 else "critical"
+                    })
+                
+                # 2. 응답 시간 분포 (최근 1시간, 5분 단위)
+                cursor.execute("""
+                    SELECT 
+                        DATE_FORMAT(request_time, '%Y-%m-%d %H:%i') as time_bucket,
+                        COALESCE(AVG(response_time), 0) as avg_response_time,
+                        COALESCE(MAX(response_time), 0) as max_response_time,
+                        COALESCE(MIN(response_time), 0) as min_response_time,
+                        COUNT(*) as request_count
+                    FROM request_logs 
+                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    GROUP BY time_bucket
+                    ORDER BY time_bucket DESC
+                    LIMIT 12
+                """)
+                response_time_data = []
+                for row in cursor.fetchall():
+                    response_time_data.append({
+                        "time": row["time_bucket"],
+                        "avg_response_time": round(row["avg_response_time"], 2),
+                        "max_response_time": round(row["max_response_time"], 2),
+                        "min_response_time": round(row["min_response_time"], 2),
+                        "request_count": row["request_count"]
+                    })
+                response_time_data.reverse()  # 시간순으로 정렬
+                
+                # 3. 에러율 (최근 1시간, 5분 단위)
+                cursor.execute("""
+                    SELECT 
+                        DATE_FORMAT(request_time, '%Y-%m-%d %H:%i') as time_bucket,
+                        COUNT(*) as total_requests,
+                        COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count
+                    FROM request_logs 
+                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    GROUP BY time_bucket
+                    ORDER BY time_bucket DESC
+                    LIMIT 12
+                """)
+                error_rate_data = []
+                for row in cursor.fetchall():
+                    error_rate = (row["error_count"] / row["total_requests"] * 100) if row["total_requests"] > 0 else 0
+                    error_rate_data.append({
+                        "time": row["time_bucket"],
+                        "total_requests": row["total_requests"],
+                        "error_count": row["error_count"],
+                        "error_rate": round(error_rate, 2)
+                    })
+                error_rate_data.reverse()  # 시간순으로 정렬
+                
+                # 4. TPS (Transactions Per Second) - 최근 1시간, 1분 단위
+                cursor.execute("""
+                    SELECT 
+                        DATE_FORMAT(request_time, '%Y-%m-%d %H:%i') as time_bucket,
+                        COUNT(*) as request_count
+                    FROM request_logs 
+                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    GROUP BY time_bucket
+                    ORDER BY time_bucket DESC
+                    LIMIT 60
+                """)
+                tps_data = []
+                for row in cursor.fetchall():
+                    tps_data.append({
+                        "time": row["time_bucket"],
+                        "tps": round(row["request_count"] / 60, 2)  # 1분당 요청수를 초당으로 변환
+                    })
+                tps_data.reverse()  # 시간순으로 정렬
+                
+                # 5. 전체 시스템 상태 요약
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_requests_1h,
+                        COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_requests_1h,
+                        COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_requests_1h,
+                        COALESCE(AVG(response_time), 0) as avg_response_time_1h,
+                        COUNT(DISTINCT user_id) as unique_users_1h
+                    FROM request_logs 
+                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                """)
+                summary = cursor.fetchone()
+                
+                system_summary = {
+                    "total_requests_1h": summary["total_requests_1h"] or 0,
+                    "success_requests_1h": summary["success_requests_1h"] or 0,
+                    "error_requests_1h": summary["error_requests_1h"] or 0,
+                    "avg_response_time_1h": round(summary["avg_response_time_1h"] or 0, 2),
+                    "unique_users_1h": summary["unique_users_1h"] or 0,
+                    "success_rate_1h": round((summary["success_requests_1h"] / summary["total_requests_1h"] * 100) if summary["total_requests_1h"] > 0 else 0, 2),
+                    "error_rate_1h": round((summary["error_requests_1h"] / summary["total_requests_1h"] * 100) if summary["total_requests_1h"] > 0 else 0, 2)
+                }
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "api_status": api_status,
+                        "response_time_data": response_time_data,
+                        "error_rate_data": error_rate_data,
+                        "tps_data": tps_data,
+                        "system_summary": system_summary,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"실시간 모니터링 데이터 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="실시간 모니터링 데이터 조회에 실패했습니다")
