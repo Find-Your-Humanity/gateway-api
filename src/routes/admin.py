@@ -7,6 +7,14 @@ from typing import List, Optional
 from src.config.database import get_db_connection
 from src.utils.auth import get_password_hash
 from src.routes.auth import get_current_user_from_request
+from src.utils.log_queries import (
+    get_api_status_query,
+    get_response_time_query,
+    get_error_rate_query,
+    get_tps_query,
+    get_system_summary_query,
+    get_time_filter
+)
 from fastapi import Request
 import logging
 
@@ -1889,25 +1897,8 @@ def get_realtime_monitoring(request: Request):
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 1. API 상태 (각 엔드포인트별 최근 상태) - 두 로그 테이블 통합
-                cursor.execute("""
-                    SELECT 
-                        path as endpoint,
-                        COUNT(*) as total_requests,
-                        COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_count,
-                        COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
-                        COALESCE(AVG(response_time), 0) as avg_response_time,
-                        MAX(created_at) as last_request_time
-                    FROM (
-                        SELECT path, status_code, response_time, created_at FROM request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                        UNION ALL
-                        SELECT path, status_code, response_time, created_at FROM api_request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                    ) as combined_logs
-                    GROUP BY path
-                    ORDER BY total_requests DESC
-                """)
+                # 1. API 상태 (각 엔드포인트별 최근 상태) - 공통 함수 사용
+                cursor.execute(get_api_status_query(get_time_filter(1)))
                 api_status = []
                 for row in cursor.fetchall():
                     success_rate = (row["success_count"] / row["total_requests"] * 100) if row["total_requests"] > 0 else 0
@@ -1922,25 +1913,8 @@ def get_realtime_monitoring(request: Request):
                         "status": "healthy" if success_rate >= 95 else "warning" if success_rate >= 80 else "critical"
                     })
                 
-                # 2. 응답 시간 분포 (최근 1시간, 5분 단위) - 두 로그 테이블 통합
-                cursor.execute("""
-                    SELECT 
-                        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
-                        COALESCE(AVG(response_time), 0) as avg_response_time,
-                        COALESCE(MAX(response_time), 0) as max_response_time,
-                        COALESCE(MIN(response_time), 0) as min_response_time,
-                        COUNT(*) as request_count
-                    FROM (
-                        SELECT response_time, created_at FROM request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                        UNION ALL
-                        SELECT response_time, created_at FROM api_request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                    ) as combined_logs
-                    GROUP BY time_bucket
-                    ORDER BY time_bucket DESC
-                    LIMIT 12
-                """)
+                # 2. 응답 시간 분포 (최근 1시간, 5분 단위) - 공통 함수 사용
+                cursor.execute(get_response_time_query(get_time_filter(1), "5분", 12))
                 response_time_data = []
                 for row in cursor.fetchall():
                     response_time_data.append({
@@ -1952,23 +1926,8 @@ def get_realtime_monitoring(request: Request):
                     })
                 response_time_data.reverse()  # 시간순으로 정렬
                 
-                # 3. 에러율 (최근 1시간, 5분 단위) - 두 로그 테이블 통합
-                cursor.execute("""
-                    SELECT 
-                        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
-                        COUNT(*) as total_requests,
-                        COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count
-                    FROM (
-                        SELECT status_code, created_at FROM request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                        UNION ALL
-                        SELECT status_code, created_at FROM api_request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                    ) as combined_logs
-                    GROUP BY time_bucket
-                    ORDER BY time_bucket DESC
-                    LIMIT 12
-                """)
+                # 3. 에러율 (최근 1시간, 5분 단위) - 공통 함수 사용
+                cursor.execute(get_error_rate_query(get_time_filter(1), "5분", 12))
                 error_rate_data = []
                 for row in cursor.fetchall():
                     error_rate = (row["error_count"] / row["total_requests"] * 100) if row["total_requests"] > 0 else 0
@@ -1980,22 +1939,8 @@ def get_realtime_monitoring(request: Request):
                     })
                 error_rate_data.reverse()  # 시간순으로 정렬
                 
-                # 4. TPS (Transactions Per Second) - 최근 1시간, 1분 단위 - 두 로그 테이블 통합
-                cursor.execute("""
-                    SELECT 
-                        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
-                        COUNT(*) as request_count
-                    FROM (
-                        SELECT created_at FROM request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                        UNION ALL
-                        SELECT created_at FROM api_request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                    ) as combined_logs
-                    GROUP BY time_bucket
-                    ORDER BY time_bucket DESC
-                    LIMIT 60
-                """)
+                # 4. TPS (Transactions Per Second) - 최근 1시간, 1분 단위 - 공통 함수 사용
+                cursor.execute(get_tps_query(get_time_filter(1), 60))
                 tps_data = []
                 for row in cursor.fetchall():
                     tps_data.append({
@@ -2004,22 +1949,8 @@ def get_realtime_monitoring(request: Request):
                     })
                 tps_data.reverse()  # 시간순으로 정렬
                 
-                # 5. 전체 시스템 상태 요약 - 두 로그 테이블 통합
-                cursor.execute("""
-                    SELECT 
-                        COUNT(*) as total_requests_1h,
-                        COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_requests_1h,
-                        COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_requests_1h,
-                        COALESCE(AVG(response_time), 0) as avg_response_time_1h,
-                        COUNT(DISTINCT user_id) as unique_users_1h
-                    FROM (
-                        SELECT status_code, response_time, user_id FROM request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                        UNION ALL
-                        SELECT status_code, response_time, user_id FROM api_request_logs 
-                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
-                    ) as combined_logs
-                """)
+                # 5. 전체 시스템 상태 요약 - 공통 함수 사용
+                cursor.execute(get_system_summary_query(get_time_filter(1)))
                 summary = cursor.fetchone()
                 
                 system_summary = {
