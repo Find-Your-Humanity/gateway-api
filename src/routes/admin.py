@@ -2144,7 +2144,6 @@ async def get_plan_distribution(
                     LEFT JOIN (
                         SELECT plan_id, COUNT(*) AS user_count
                         FROM users
-                        WHERE is_active = 1 OR is_active = TRUE
                         GROUP BY plan_id
                     ) u_stats ON u_stats.plan_id = p.id
                     LEFT JOIN (
