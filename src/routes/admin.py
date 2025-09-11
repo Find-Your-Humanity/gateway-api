@@ -2090,12 +2090,12 @@ async def get_system_stats(
     """
     try:
         # 관리자 권한 확인
-        if not current_user.get('is_admin'):
+        if not current_user or not current_user.get('is_admin'):
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 일별 시스템 통계 조회 (간단한 버전)
+                # 일별 시스템 통계 조회 (request_logs만 사용)
                 cursor.execute("""
                     SELECT 
                         DATE(request_time) as date,
@@ -2106,21 +2106,8 @@ async def get_system_stats(
                     FROM request_logs 
                     WHERE request_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
                     GROUP BY DATE(request_time)
-                    
-                    UNION ALL
-                    
-                    SELECT 
-                        DATE(created_at) as date,
-                        COUNT(*) as total_requests,
-                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as successful_requests,
-                        SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed_requests,
-                        COUNT(DISTINCT user_id) as active_users
-                    FROM api_request_logs 
-                    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
-                    GROUP BY DATE(created_at)
-                    
                     ORDER BY date DESC
-                """, (days, days))
+                """, (days,))
                 
                 stats = cursor.fetchall()
                 
@@ -2157,7 +2144,7 @@ async def get_user_growth(
     """
     try:
         # 관리자 권한 확인
-        if not current_user.get('is_admin'):
+        if not current_user or not current_user.get('is_admin'):
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
         
         with get_db_connection() as conn:
@@ -2165,12 +2152,12 @@ async def get_user_growth(
                 # 월별 사용자 증가 데이터 조회
                 cursor.execute("""
                     SELECT 
-                        DATE_FORMAT(created_at, '%Y-%m') as month,
+                        DATE_FORMAT(created_at, '%%Y-%%m') as month,
                         COUNT(*) as new_users,
-                        SUM(COUNT(*)) OVER (ORDER BY DATE_FORMAT(created_at, '%Y-%m')) as total_users
+                        SUM(COUNT(*)) OVER (ORDER BY DATE_FORMAT(created_at, '%%Y-%%m')) as total_users
                     FROM users 
                     WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)
-                    GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+                    GROUP BY DATE_FORMAT(created_at, '%%Y-%%m')
                     ORDER BY month ASC
                 """, (months,))
                 
@@ -2207,7 +2194,7 @@ async def get_plan_distribution(
     """
     try:
         # 관리자 권한 확인
-        if not current_user.get('is_admin'):
+        if not current_user or not current_user.get('is_admin'):
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
         
         with get_db_connection() as conn:
@@ -2264,12 +2251,12 @@ async def get_error_stats(
     """
     try:
         # 관리자 권한 확인
-        if not current_user.get('is_admin'):
+        if not current_user or not current_user.get('is_admin'):
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 에러 통계 조회
+                # 에러 통계 조회 (request_logs만 사용)
                 cursor.execute("""
                     SELECT 
                         CASE 
@@ -2282,18 +2269,12 @@ async def get_error_stats(
                             ELSE '기타 오류'
                         END as error_type,
                         COUNT(*) as count
-                    FROM (
-                        SELECT status_code FROM request_logs 
-                        WHERE request_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY) 
-                        AND status_code >= 400
-                        UNION ALL
-                        SELECT status_code FROM api_request_logs 
-                        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL %s DAY) 
-                        AND status_code >= 400
-                    ) as error_logs
+                    FROM request_logs 
+                    WHERE request_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY) 
+                    AND status_code >= 400
                     GROUP BY error_type
                     ORDER BY count DESC
-                """, (days, days))
+                """, (days,))
                 
                 error_data = cursor.fetchall()
                 
