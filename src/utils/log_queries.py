@@ -58,12 +58,12 @@ def get_api_status_query(time_filter: str = "NOW() - INTERVAL 1 HOUR") -> str:
             COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_count,
             COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
             COALESCE(AVG(response_time), 0) as avg_response_time,
-            MAX(created_at) as last_request_time
+            MAX(request_time) as last_request_time
         FROM (
-            SELECT path, status_code, response_time, created_at FROM request_logs 
-            WHERE created_at >= {time_filter}
+            SELECT path, status_code, response_time, request_time FROM request_logs 
+            WHERE request_time >= {time_filter}
             UNION ALL
-            SELECT path, status_code, response_time, created_at FROM api_request_logs 
+            SELECT path, status_code, response_time, created_at as request_time FROM api_request_logs 
             WHERE created_at >= {time_filter}
         ) as combined_logs
         GROUP BY path
@@ -77,11 +77,11 @@ def get_response_time_query(
 ) -> str:
     """응답 시간 분포 조회 쿼리"""
     if time_bucket == "5분":
-        date_format = "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')"
+        date_format = "DATE_FORMAT(request_time, '%Y-%m-%d %H:%i')"
     elif time_bucket == "1분":
-        date_format = "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')"
+        date_format = "DATE_FORMAT(request_time, '%Y-%m-%d %H:%i')"
     else:
-        date_format = "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')"
+        date_format = "DATE_FORMAT(request_time, '%Y-%m-%d %H:%i')"
     
     return f"""
         SELECT 
@@ -91,10 +91,10 @@ def get_response_time_query(
             COALESCE(MIN(response_time), 0) as min_response_time,
             COUNT(*) as request_count
         FROM (
-            SELECT response_time, created_at FROM request_logs 
-            WHERE created_at >= {time_filter}
+            SELECT response_time, request_time FROM request_logs 
+            WHERE request_time >= {time_filter}
             UNION ALL
-            SELECT response_time, created_at FROM api_request_logs 
+            SELECT response_time, created_at as request_time FROM api_request_logs 
             WHERE created_at >= {time_filter}
         ) as combined_logs
         GROUP BY time_bucket
@@ -109,11 +109,11 @@ def get_error_rate_query(
 ) -> str:
     """에러율 조회 쿼리"""
     if time_bucket == "5분":
-        date_format = "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')"
+        date_format = "DATE_FORMAT(request_time, '%Y-%m-%d %H:%i')"
     elif time_bucket == "1분":
-        date_format = "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')"
+        date_format = "DATE_FORMAT(request_time, '%Y-%m-%d %H:%i')"
     else:
-        date_format = "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')"
+        date_format = "DATE_FORMAT(request_time, '%Y-%m-%d %H:%i')"
     
     return f"""
         SELECT 
@@ -121,10 +121,10 @@ def get_error_rate_query(
             COUNT(*) as total_requests,
             COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count
         FROM (
-            SELECT status_code, created_at FROM request_logs 
-            WHERE created_at >= {time_filter}
+            SELECT status_code, request_time FROM request_logs 
+            WHERE request_time >= {time_filter}
             UNION ALL
-            SELECT status_code, created_at FROM api_request_logs 
+            SELECT status_code, created_at as request_time FROM api_request_logs 
             WHERE created_at >= {time_filter}
         ) as combined_logs
         GROUP BY time_bucket
@@ -139,13 +139,13 @@ def get_tps_query(
     """TPS (Transactions Per Second) 조회 쿼리"""
     return f"""
         SELECT 
-            DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') as time_bucket,
+            DATE_FORMAT(request_time, '%Y-%m-%d %H:%i') as time_bucket,
             COUNT(*) as request_count
         FROM (
-            SELECT created_at FROM request_logs 
-            WHERE created_at >= {time_filter}
+            SELECT request_time FROM request_logs 
+            WHERE request_time >= {time_filter}
             UNION ALL
-            SELECT created_at FROM api_request_logs 
+            SELECT created_at as request_time FROM api_request_logs 
             WHERE created_at >= {time_filter}
         ) as combined_logs
         GROUP BY time_bucket
@@ -164,7 +164,7 @@ def get_system_summary_query(time_filter: str = "NOW() - INTERVAL 1 HOUR") -> st
             COUNT(DISTINCT user_id) as unique_users_1h
         FROM (
             SELECT status_code, response_time, user_id FROM request_logs 
-            WHERE created_at >= {time_filter}
+            WHERE request_time >= {time_filter}
             UNION ALL
             SELECT status_code, response_time, user_id FROM api_request_logs 
             WHERE created_at >= {time_filter}
