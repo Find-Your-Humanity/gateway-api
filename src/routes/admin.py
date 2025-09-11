@@ -65,6 +65,11 @@ async def public_next_captcha_proxy(request: Request):
         logger.error(f"Proxy to captcha-api failed: {e}")
         raise HTTPException(status_code=502, detail="Captcha service unavailable")
 
+# 위젯이 apiEndpoint + '/api/next-captcha' 형태로 호출하는 경우 대응용 별칭 경로
+@router.post("/public/api/next-captcha", include_in_schema=False)
+async def public_next_captcha_proxy_alias(request: Request):
+    return await public_next_captcha_proxy(request)
+
 # Pydantic 모델들
 class UserResponse(BaseModel):
     id: int
