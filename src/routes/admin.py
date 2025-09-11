@@ -25,6 +25,15 @@ import httpx
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["admin"])
+@router.get("/public", include_in_schema=False)
+async def public_root_health():
+    return {"ok": True}
+
+@router.head("/public", include_in_schema=False)
+async def public_root_health_head():
+    from fastapi import Response
+    return Response(status_code=200)
+
 @router.post("/public/next-captcha")
 async def public_next_captcha_proxy(request: Request):
     """
