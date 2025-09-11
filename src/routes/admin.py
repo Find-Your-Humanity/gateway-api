@@ -1698,6 +1698,76 @@ def get_error_statistics(
         logger.error(f"Error fetching error statistics: {e}")
         raise HTTPException(status_code=500, detail=f"오류 통계 조회 실패: {str(e)}")
 
+@router.get("/admin/dashboard-metrics")
+def get_admin_dashboard_metrics(request: Request):
+    """관리자 대시보드 메트릭 조회"""
+    try:
+        # 관리자 권한 확인
+        current_user = get_current_user_from_request(request)
+        if not current_user or not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 1. 총 사용자 수
+                cursor.execute("SELECT COUNT(*) as total_users FROM users")
+                total_users = cursor.fetchone()["total_users"]
+                
+                # 2. 오늘 신규 사용자
+                cursor.execute("""
+                    SELECT COUNT(*) as new_users_today 
+                    FROM users 
+                    WHERE DATE(created_at) = CURDATE()
+                """)
+                new_users_today = cursor.fetchone()["new_users_today"]
+                
+                # 3. 현재 활성 사용자 (최근 1시간 내 요청한 사용자)
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT user_id) as active_users
+                    FROM request_logs 
+                    WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                    AND user_id IS NOT NULL
+                """)
+                active_users = cursor.fetchone()["active_users"]
+                
+                # 4. 총 요청 수 및 성공률
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_requests,
+                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as success_count
+                    FROM request_logs
+                """)
+                request_stats = cursor.fetchone()
+                total_requests = request_stats["total_requests"]
+                success_count = request_stats["success_count"]
+                success_rate = (success_count / total_requests * 100) if total_requests > 0 else 0
+                
+                # 5. 월간 수익 (이번 달 결제 완료 금액)
+                cursor.execute("""
+                    SELECT COALESCE(SUM(amount), 0) as revenue
+                    FROM payment_logs 
+                    WHERE status = 'completed' 
+                    AND DATE_FORMAT(created_at, '%Y-%m') = DATE_FORMAT(NOW(), '%Y-%m')
+                """)
+                revenue = cursor.fetchone()["revenue"]
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "totalUsers": total_users,
+                        "newUsersToday": new_users_today,
+                        "activeUsers": active_users,
+                        "totalRequests": total_requests,
+                        "successRate": round(success_rate, 1),
+                        "revenue": revenue
+                    }
+                }
+                
+    except Exception as e:
+        logger.error(f"관리자 대시보드 메트릭 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="메트릭 조회에 실패했습니다")
+
+
 @router.get("/admin/endpoint-usage")
 def get_endpoint_usage(
     request: Request,
