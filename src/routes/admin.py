@@ -1755,11 +1755,10 @@ def get_admin_dashboard_metrics(request: Request):
                 cursor.execute("""
                     SELECT 
                         p.display_name as plan_name,
-                        COUNT(u.id) as user_count,
-                        p.color
+                        COUNT(u.id) as user_count
                     FROM users u
                     LEFT JOIN plans p ON u.plan_id = p.id
-                    GROUP BY p.id, p.display_name, p.color
+                    GROUP BY p.id, p.display_name
                     ORDER BY user_count DESC
                 """)
                 plan_distribution_raw = cursor.fetchall()
@@ -1767,6 +1766,16 @@ def get_admin_dashboard_metrics(request: Request):
                 # 플랜별 분포 계산
                 plan_distribution = []
                 total_users_for_distribution = sum(row["user_count"] for row in plan_distribution_raw)
+                
+                # 플랜별 색상 매핑
+                plan_colors = {
+                    "Free": "#8884d8",
+                    "Basic": "#82ca9d", 
+                    "Pro": "#ffc658",
+                    "Enterprise": "#ff7300",
+                    "Starter": "#1976d2",
+                    "Plus": "#2e7d32"
+                }
                 
                 for row in plan_distribution_raw:
                     plan_name = row["plan_name"] or "Free"
@@ -1777,7 +1786,7 @@ def get_admin_dashboard_metrics(request: Request):
                         "name": plan_name,
                         "value": round(percentage, 1),
                         "count": user_count,
-                        "color": row["color"] or "#1976d2"
+                        "color": plan_colors.get(plan_name, "#1976d2")
                     })
                 
                 return {
