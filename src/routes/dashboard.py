@@ -5,6 +5,13 @@ import pymysql
 from src.config.database import get_db_connection, cleanup_duplicate_request_statistics
 from src.routes.auth import get_current_user_from_request
 from src.middleware.usage_tracking import ApiUsageTracker
+from src.utils.log_queries import (
+    get_user_usage_query,
+    get_endpoint_usage_query,
+    get_time_filter_days,
+    get_time_filter_weeks,
+    get_time_filter_months
+)
 import logging
 
 logger = logging.getLogger(__name__)

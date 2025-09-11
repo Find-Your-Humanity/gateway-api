@@ -18,6 +18,7 @@ from src.utils.log_queries import (
 )
 from fastapi import Request
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
