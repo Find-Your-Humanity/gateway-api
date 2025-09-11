@@ -437,7 +437,7 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 if plan_data:
                     limits = {
                         "perMinute": plan_data.get("rate_limit_per_minute", 60),
-                        "perDay": plan_data.get("monthly_request_limit", 1000) / 30,  # 월간 제한을 일일로 나눔
+                        "perDay": 1000,  # 일일 제한을 1000으로 고정
                         "perMonth": plan_data.get("monthly_request_limit", 30000)
                     }
                 else:
