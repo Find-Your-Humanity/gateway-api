@@ -2139,6 +2139,7 @@ async def get_plan_distribution(
                         p.display_name AS name,
                         p.price,
                         COALESCE(u_stats.user_count, 0) AS users,
+                        COALESCE(u_inactive_stats.inactive_count, 0) AS inactive_users,
                         COALESCE(r_stats.revenue, 0) AS revenue
                     FROM plans p
                     LEFT JOIN (
@@ -2146,6 +2147,12 @@ async def get_plan_distribution(
                         FROM users
                         GROUP BY plan_id
                     ) u_stats ON u_stats.plan_id = p.id
+                    LEFT JOIN (
+                        SELECT plan_id, COUNT(*) AS inactive_count
+                        FROM users
+                        WHERE (is_active = 0 OR is_active = FALSE)
+                        GROUP BY plan_id
+                    ) u_inactive_stats ON u_inactive_stats.plan_id = p.id
                     LEFT JOIN (
                         SELECT u.plan_id, SUM(pl.amount) AS revenue
                         FROM payment_logs pl
@@ -2170,6 +2177,7 @@ async def get_plan_distribution(
                         "name": plan['name'],
                         "value": round(percentage, 1),
                         "users": plan['users'],
+                        "inactiveUsers": plan.get('inactive_users', 0),
                         "revenue": float(plan['revenue']) if plan['revenue'] else 0
                     })
                 
