@@ -21,6 +21,7 @@ import logging
 from datetime import datetime
 import os
 import httpx
+import hmac, hashlib, base64, json, time
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,85 @@ async def public_next_captcha_alias_options():
 
 @router.head("/public/api/next-captcha", include_in_schema=False)
 async def public_next_captcha_alias_head():
+    return Response(status_code=200)
+
+# ===== Demo token endpoints (gateway-managed, no public/secret key on client) =====
+def _sign_demo(payload: dict, secret: str) -> str:
+    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), data, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(data).decode().rstrip('=') + "." + base64.urlsafe_b64encode(sig).decode().rstrip('=')
+
+def _verify_demo(token: str, secret: str) -> dict:
+    try:
+        data_b64, sig_b64 = token.split(".", 1)
+        # pad
+        def _pad(s):
+            return s + "=" * ((4 - len(s) % 4) % 4)
+        data = base64.urlsafe_b64decode(_pad(data_b64))
+        sig = base64.urlsafe_b64decode(_pad(sig_b64))
+        exp_sig = hmac.new(secret.encode("utf-8"), data, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig, exp_sig):
+            return {}
+        payload = json.loads(data.decode("utf-8"))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            return {}
+        return payload
+    except Exception:
+        return {}
+
+@router.post("/public/demo/token", include_in_schema=False)
+async def demo_token_issue(request: Request):
+    demo_secret = os.getenv("DEMO_TOKEN_SECRET")
+    if not demo_secret:
+        raise HTTPException(status_code=500, detail="Demo token not configured")
+    allowed = os.getenv("DEMO_ALLOWED_ORIGINS", "*")
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    if allowed != "*" and origin and not any(o for o in allowed.split(",") if o.strip() and o.strip() in origin):
+        raise HTTPException(status_code=403, detail="Origin not allowed")
+    ttl = int(os.getenv("DEMO_TOKEN_TTL", "300"))
+    payload = {"iat": int(time.time()), "exp": int(time.time()) + ttl, "kind": "demo"}
+    token = _sign_demo(payload, demo_secret)
+    return {"success": True, "demo_token": token, "expires_in": ttl}
+
+@router.post("/public/demo/next-captcha", include_in_schema=False)
+async def demo_next_captcha(request: Request):
+    demo_secret = os.getenv("DEMO_TOKEN_SECRET")
+    if not demo_secret:
+        raise HTTPException(status_code=500, detail="Demo token not configured")
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    demo_token = request.headers.get("x_demo_token") or request.headers.get("x-demo-token")
+    if not demo_token:
+        raise HTTPException(status_code=401, detail="Demo token required")
+    payload = _verify_demo(demo_token, demo_secret)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid demo token")
+    # forward with demo keys
+    demo_public_key = os.getenv("DEMO_PUBLIC_KEY", "rc_live_f49a055d62283fd02e8203ccaba70fc2")
+    demo_secret_key = os.getenv("DEMO_SECRET_KEY")
+    if not demo_secret_key:
+        raise HTTPException(status_code=500, detail="Demo secret not configured")
+    captcha_api_base = os.getenv("CAPTCHA_API_BASE", "http://captcha-api:8000")
+    target_url = f"{captcha_api_base}/api/next-captcha"
+    headers = {"x_api_key": demo_public_key, "x_secret_key": demo_secret_key}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(target_url, json=body, headers=headers)
+        return {"status": resp.status_code, **resp.json()}
+    except httpx.HTTPError as e:
+        logger.error(f"Demo proxy to captcha-api failed: {e}")
+        raise HTTPException(status_code=502, detail="Captcha service unavailable")
+
+# wildcard HEAD/OPTIONS for /api/public/* to avoid 405
+@router.options("/public/{path:path}", include_in_schema=False)
+async def public_any_options(path: str):
+    return Response(status_code=200)
+
+@router.head("/public/{path:path}", include_in_schema=False)
+async def public_any_head(path: str):
     return Response(status_code=200)
 
 # Pydantic 모델들
