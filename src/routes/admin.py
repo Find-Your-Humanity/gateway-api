@@ -9,6 +9,7 @@ from src.utils.auth import get_password_hash
 from src.routes.auth import get_current_user_from_request
 from src.utils.log_queries import (
     get_api_status_query,
+    get_api_status_query_api_logs,
     get_response_time_query,
     get_error_rate_query,
     get_tps_query,
@@ -1943,21 +1944,71 @@ def get_realtime_monitoring(request: Request):
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 1. API 상태 (각 엔드포인트별 최근 상태) - 공통 함수 사용
+                # 1. API 상태 (각 엔드포인트별 최근 상태) - 두 테이블을 별도로 조회 후 합치기
+                # request_logs 테이블 조회
                 cursor.execute(get_api_status_query(get_time_filter(1)))
-                api_status = []
-                for row in cursor.fetchall():
-                    success_rate = (row["success_count"] / row["total_requests"] * 100) if row["total_requests"] > 0 else 0
-                    api_status.append({
-                        "endpoint": row["endpoint"],
+                request_logs_data = cursor.fetchall()
+                
+                # api_request_logs 테이블 조회
+                cursor.execute(get_api_status_query_api_logs(get_time_filter(1)))
+                api_request_logs_data = cursor.fetchall()
+                
+                # 두 결과를 합치기
+                combined_data = {}
+                
+                # request_logs 데이터 추가
+                for row in request_logs_data:
+                    endpoint = row["endpoint"]
+                    combined_data[endpoint] = {
+                        "endpoint": endpoint,
                         "total_requests": row["total_requests"],
                         "success_count": row["success_count"],
                         "error_count": row["error_count"],
+                        "avg_response_time": row["avg_response_time"],
+                        "last_request_time": row["last_request_time"]
+                    }
+                
+                # api_request_logs 데이터 추가/합치기
+                for row in api_request_logs_data:
+                    endpoint = row["endpoint"]
+                    if endpoint in combined_data:
+                        # 기존 데이터와 합치기
+                        combined_data[endpoint]["total_requests"] += row["total_requests"]
+                        combined_data[endpoint]["success_count"] += row["success_count"]
+                        combined_data[endpoint]["error_count"] += row["error_count"]
+                        # 평균 응답시간은 가중평균으로 계산 (간단히 평균)
+                        combined_data[endpoint]["avg_response_time"] = (combined_data[endpoint]["avg_response_time"] + row["avg_response_time"]) / 2
+                        # 더 최근 시간으로 업데이트
+                        if row["last_request_time"] > combined_data[endpoint]["last_request_time"]:
+                            combined_data[endpoint]["last_request_time"] = row["last_request_time"]
+                    else:
+                        # 새로운 엔드포인트 추가
+                        combined_data[endpoint] = {
+                            "endpoint": endpoint,
+                            "total_requests": row["total_requests"],
+                            "success_count": row["success_count"],
+                            "error_count": row["error_count"],
+                            "avg_response_time": row["avg_response_time"],
+                            "last_request_time": row["last_request_time"]
+                        }
+                
+                # 최종 결과 생성
+                api_status = []
+                for data in combined_data.values():
+                    success_rate = (data["success_count"] / data["total_requests"] * 100) if data["total_requests"] > 0 else 0
+                    api_status.append({
+                        "endpoint": data["endpoint"],
+                        "total_requests": data["total_requests"],
+                        "success_count": data["success_count"],
+                        "error_count": data["error_count"],
                         "success_rate": round(success_rate, 2),
-                        "avg_response_time": round(row["avg_response_time"], 2),
-                        "last_request_time": row["last_request_time"].isoformat() if row["last_request_time"] else None,
+                        "avg_response_time": round(data["avg_response_time"], 2),
+                        "last_request_time": data["last_request_time"].isoformat() if data["last_request_time"] else None,
                         "status": "healthy" if success_rate >= 95 else "warning" if success_rate >= 80 else "critical"
                     })
+                
+                # 요청 수로 정렬
+                api_status.sort(key=lambda x: x["total_requests"], reverse=True)
                 
                 # 2. 응답 시간 분포 (최근 1시간, 5분 단위) - 공통 함수 사용
                 cursor.execute(get_response_time_query(get_time_filter(1), "5분", 12))

@@ -50,7 +50,7 @@ def get_combined_logs_query(
     return query
 
 def get_api_status_query(time_filter: str = "NOW() - INTERVAL 1 HOUR") -> str:
-    """API 상태 조회 쿼리"""
+    """API 상태 조회 쿼리 - request_logs 테이블만"""
     return f"""
         SELECT 
             path as endpoint,
@@ -59,13 +59,24 @@ def get_api_status_query(time_filter: str = "NOW() - INTERVAL 1 HOUR") -> str:
             COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
             COALESCE(AVG(response_time), 0) as avg_response_time,
             MAX(request_time) as last_request_time
-        FROM (
-            SELECT CAST(path AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as path, status_code, response_time, request_time FROM request_logs 
-            WHERE request_time >= {time_filter}
-            UNION ALL
-            SELECT CAST(path AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci as path, status_code, response_time, created_at as request_time FROM api_request_logs 
-            WHERE created_at >= {time_filter}
-        ) as combined_logs
+        FROM request_logs 
+        WHERE request_time >= {time_filter}
+        GROUP BY path
+        ORDER BY total_requests DESC
+    """
+
+def get_api_status_query_api_logs(time_filter: str = "NOW() - INTERVAL 1 HOUR") -> str:
+    """API 상태 조회 쿼리 - api_request_logs 테이블만"""
+    return f"""
+        SELECT 
+            path as endpoint,
+            COUNT(*) as total_requests,
+            COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_count,
+            COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count,
+            COALESCE(AVG(response_time), 0) as avg_response_time,
+            MAX(created_at) as last_request_time
+        FROM api_request_logs 
+        WHERE created_at >= {time_filter}
         GROUP BY path
         ORDER BY total_requests DESC
     """
