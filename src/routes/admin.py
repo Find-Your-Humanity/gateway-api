@@ -1711,7 +1711,7 @@ def get_admin_dashboard_metrics(request: Request):
             with conn.cursor() as cursor:
                 # 1. 총 사용자 수
                 cursor.execute("SELECT COUNT(*) as total_users FROM users")
-                total_users = cursor.fetchone()["total_users"]
+                total_users = cursor.fetchone()["total_users"] or 0
                 
                 # 2. 오늘 신규 사용자
                 cursor.execute("""
@@ -1719,7 +1719,7 @@ def get_admin_dashboard_metrics(request: Request):
                     FROM users 
                     WHERE DATE(created_at) = CURDATE()
                 """)
-                new_users_today = cursor.fetchone()["new_users_today"]
+                new_users_today = cursor.fetchone()["new_users_today"] or 0
                 
                 # 3. 현재 활성 사용자 (최근 1시간 내 요청한 사용자)
                 cursor.execute("""
@@ -1728,18 +1728,18 @@ def get_admin_dashboard_metrics(request: Request):
                     WHERE request_time >= NOW() - INTERVAL 1 HOUR
                     AND user_id IS NOT NULL
                 """)
-                active_users = cursor.fetchone()["active_users"]
+                active_users = cursor.fetchone()["active_users"] or 0
                 
                 # 4. 총 요청 수 및 성공률
                 cursor.execute("""
                     SELECT 
                         COUNT(*) as total_requests,
-                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as success_count
+                        COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_count
                     FROM request_logs
                 """)
                 request_stats = cursor.fetchone()
-                total_requests = request_stats["total_requests"]
-                success_count = request_stats["success_count"]
+                total_requests = request_stats["total_requests"] or 0
+                success_count = request_stats["success_count"] or 0
                 success_rate = (success_count / total_requests * 100) if total_requests > 0 else 0
                 
                 # 5. 월간 수익 (이번 달 결제 완료 금액)
