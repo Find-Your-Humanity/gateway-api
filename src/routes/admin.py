@@ -1751,6 +1751,35 @@ def get_admin_dashboard_metrics(request: Request):
                 """)
                 revenue = cursor.fetchone()["revenue"]
                 
+                # 6. 플랜별 사용자 분포
+                cursor.execute("""
+                    SELECT 
+                        p.display_name as plan_name,
+                        COUNT(u.id) as user_count,
+                        p.color
+                    FROM users u
+                    LEFT JOIN plans p ON u.plan_id = p.id
+                    GROUP BY p.id, p.display_name, p.color
+                    ORDER BY user_count DESC
+                """)
+                plan_distribution_raw = cursor.fetchall()
+                
+                # 플랜별 분포 계산
+                plan_distribution = []
+                total_users_for_distribution = sum(row["user_count"] for row in plan_distribution_raw)
+                
+                for row in plan_distribution_raw:
+                    plan_name = row["plan_name"] or "Free"
+                    user_count = row["user_count"]
+                    percentage = (user_count / total_users_for_distribution * 100) if total_users_for_distribution > 0 else 0
+                    
+                    plan_distribution.append({
+                        "name": plan_name,
+                        "value": round(percentage, 1),
+                        "count": user_count,
+                        "color": row["color"] or "#1976d2"
+                    })
+                
                 return {
                     "success": True,
                     "data": {
@@ -1759,7 +1788,8 @@ def get_admin_dashboard_metrics(request: Request):
                         "activeUsers": active_users,
                         "totalRequests": total_requests,
                         "successRate": round(success_rate, 1),
-                        "revenue": revenue
+                        "revenue": revenue,
+                        "planDistribution": plan_distribution
                     }
                 }
                 
