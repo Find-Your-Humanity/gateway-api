@@ -444,29 +444,45 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                     # 기본 free 플랜 제한
                     limits = {"perMinute": 60, "perDay": 1000, "perMonth": 30000}
                 
-                # 현재 사용량 조회 (user_usage_tracking 테이블에서 캡차 사용량만)
+                # 현재 사용량 조회 (daily_user_api_stats 테이블에서)
                 now = datetime.now()
                 
-                # user_usage_tracking 테이블에서 오늘 사용량 조회
+                # 오늘 사용량 조회
                 cursor.execute(
                     """
                     SELECT 
-                        per_minute_count,
-                        per_day_count,
-                        per_month_count
-                    FROM user_usage_tracking 
-                    WHERE user_id = %s AND tracking_date = CURDATE()
+                        SUM(total_requests) as total_requests,
+                        SUM(successful_requests) as successful_requests,
+                        SUM(failed_requests) as failed_requests
+                    FROM daily_user_api_stats 
+                    WHERE user_id = %s AND date = CURDATE()
                     """,
                     (current_user["id"],)
                 )
                 
-                usage_data = cursor.fetchone()
+                today_usage = cursor.fetchone()
+                
+                # 이번 달 사용량 조회
+                month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                cursor.execute(
+                    """
+                    SELECT 
+                        SUM(total_requests) as total_requests,
+                        SUM(successful_requests) as successful_requests,
+                        SUM(failed_requests) as failed_requests
+                    FROM daily_user_api_stats 
+                    WHERE user_id = %s AND date >= %s
+                    """,
+                    (current_user["id"], month_start)
+                )
+                
+                month_usage = cursor.fetchone()
                 
                 # 현재 사용량 (기본값 0)
                 current_usage = {
-                    "perMinute": usage_data.get("per_minute_count", 0) if usage_data else 0,
-                    "perDay": usage_data.get("per_day_count", 0) if usage_data else 0,
-                    "perMonth": usage_data.get("per_month_count", 0) if usage_data else 0
+                    "perMinute": 0,  # 분당 사용량은 별도 추적 필요
+                    "perDay": today_usage.get("total_requests", 0) if today_usage else 0,
+                    "perMonth": month_usage.get("total_requests", 0) if month_usage else 0
                 }
                 
                 # 리셋 시간 계산
