@@ -19,10 +19,42 @@ from src.utils.log_queries import (
 from fastapi import Request
 import logging
 from datetime import datetime
+import os
+import httpx
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["admin"])
+@router.post("/public/next-captcha")
+async def public_next_captcha_proxy(request: Request):
+    """
+    공개 엔드포인트(데모용): 프론트는 공개키만 보내고, 게이트웨이가 데모 시크릿을 주입하여 captcha-api의 /api/next-captcha 로 포워딩.
+    보안: 데모 공개키가 아닌 경우 거부.
+    """
+    demo_public_key = os.getenv("DEMO_PUBLIC_KEY", "rc_live_f49a055d62283fd02e8203ccaba70fc2")
+    demo_secret_key = os.getenv("DEMO_SECRET_KEY")
+    captcha_api_base = os.getenv("CAPTCHA_API_BASE", "http://captcha-api:8000")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    x_api_key = request.headers.get("x_api_key") or request.headers.get("x-api-key")
+    if not x_api_key or x_api_key != demo_public_key:
+        raise HTTPException(status_code=401, detail="Demo API key required")
+    if not demo_secret_key:
+        raise HTTPException(status_code=500, detail="Demo secret not configured")
+
+    target_url = f"{captcha_api_base}/api/next-captcha"
+    headers = {"x_api_key": x_api_key, "x_secret_key": demo_secret_key}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(target_url, json=body, headers=headers)
+        return {"status": resp.status_code, **resp.json()}
+    except httpx.HTTPError as e:
+        logger.error(f"Proxy to captcha-api failed: {e}")
+        raise HTTPException(status_code=502, detail="Captcha service unavailable")
 
 # Pydantic 모델들
 class UserResponse(BaseModel):
