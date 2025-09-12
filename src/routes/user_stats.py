@@ -81,10 +81,10 @@ def get_user_stats_overview(
                 # 1. 전체 통계 (모든 API 키 합계) - daily_user_api_stats 테이블 사용
                 overview_query = f"""
                     SELECT 
-                        SUM(total_requests) as total_requests,
-                        SUM(successful_requests) as success_requests,
-                        SUM(failed_requests) as failed_requests,
-                        AVG(avg_response_time) as avg_response_time
+                        COALESCE(SUM(total_requests), 0) as total_requests,
+                        COALESCE(SUM(successful_requests), 0) as success_requests,
+                        COALESCE(SUM(failed_requests), 0) as failed_requests,
+                        COALESCE(AVG(avg_response_time), 0.0) as avg_response_time
                     FROM daily_user_api_stats
                     WHERE user_id = %s AND {get_date_filter(period, "daily_user_api_stats")}
                 """
@@ -108,10 +108,10 @@ def get_user_stats_overview(
                 type_query = f"""
                     SELECT 
                         COALESCE(api_type, 'unknown') as captcha_type,
-                        SUM(total_requests) as total_requests,
-                        SUM(successful_requests) as success_requests,
-                        SUM(failed_requests) as failed_requests,
-                        AVG(avg_response_time) as avg_response_time
+                        COALESCE(SUM(total_requests), 0) as total_requests,
+                        COALESCE(SUM(successful_requests), 0) as success_requests,
+                        COALESCE(SUM(failed_requests), 0) as failed_requests,
+                        COALESCE(AVG(avg_response_time), 0.0) as avg_response_time
                     FROM daily_user_api_stats
                     WHERE user_id = %s AND {get_date_filter(period)}
                     GROUP BY api_type
@@ -201,10 +201,10 @@ def get_user_stats_by_api_key(
                     # API 키별 전체 통계 - daily_user_api_stats 테이블 사용
                     key_query = f"""
                         SELECT 
-                            SUM(total_requests) as total_requests,
-                            SUM(successful_requests) as success_requests,
-                            SUM(failed_requests) as failed_requests,
-                            AVG(avg_response_time) as avg_response_time
+                            COALESCE(SUM(total_requests), 0) as total_requests,
+                            COALESCE(SUM(successful_requests), 0) as success_requests,
+                            COALESCE(SUM(failed_requests), 0) as failed_requests,
+                            COALESCE(AVG(avg_response_time), 0.0) as avg_response_time
                         FROM daily_user_api_stats
                         WHERE api_key = %s AND user_id = %s AND {get_date_filter(period)}
                     """
@@ -215,10 +215,10 @@ def get_user_stats_by_api_key(
                     key_type_query = f"""
                         SELECT 
                             COALESCE(api_type, 'unknown') as captcha_type,
-                            SUM(total_requests) as total_requests,
-                            SUM(successful_requests) as success_requests,
-                            SUM(failed_requests) as failed_requests,
-                            AVG(avg_response_time) as avg_response_time
+                            COALESCE(SUM(total_requests), 0) as total_requests,
+                            COALESCE(SUM(successful_requests), 0) as success_requests,
+                            COALESCE(SUM(failed_requests), 0) as failed_requests,
+                            COALESCE(AVG(avg_response_time), 0.0) as avg_response_time
                         FROM daily_user_api_stats
                         WHERE api_key = %s AND user_id = %s AND {get_date_filter(period)}
                         GROUP BY api_type
@@ -227,24 +227,27 @@ def get_user_stats_by_api_key(
                     cursor.execute(key_type_query, (key_id, user_id))
                     key_type_stats = cursor.fetchall()
                     
-                    # 통계 계산
-                    total_requests = key_overview['total_requests'] or 0
-                    success_requests = key_overview['success_requests'] or 0
-                    failed_requests = key_overview['failed_requests'] or 0
-                    success_rate = (success_requests / total_requests * 100) if total_requests > 0 else 0
-                    avg_response_time = float(key_overview['avg_response_time'] or 0)
+                    # 통계 계산 (안전한 타입 변환)
+                    total_requests = int(key_overview['total_requests'] or 0)
+                    success_requests = int(key_overview['success_requests'] or 0)
+                    failed_requests = int(key_overview['failed_requests'] or 0)
+                    success_rate = (success_requests / total_requests * 100) if total_requests > 0 else 0.0
+                    avg_response_time = float(key_overview['avg_response_time'] or 0.0)
                     
-                    # 캡차 타입별 통계 포맷팅
+                    # 캡차 타입별 통계 포맷팅 (안전한 타입 변환)
                     captcha_types = []
                     for stat in key_type_stats:
-                        type_success_rate = (stat['success_requests'] / stat['total_requests'] * 100) if stat['total_requests'] > 0 else 0
+                        stat_total = int(stat['total_requests'] or 0)
+                        stat_success = int(stat['success_requests'] or 0)
+                        stat_failed = int(stat['failed_requests'] or 0)
+                        type_success_rate = (stat_success / stat_total * 100) if stat_total > 0 else 0.0
                         captcha_types.append({
                             "captcha_type": stat['captcha_type'],
-                            "total_requests": stat['total_requests'],
-                            "success_requests": stat['success_requests'],
-                            "failed_requests": stat['failed_requests'],
+                            "total_requests": stat_total,
+                            "success_requests": stat_success,
+                            "failed_requests": stat_failed,
                             "success_rate": round(type_success_rate, 2),
-                            "avg_response_time": round(float(stat['avg_response_time'] or 0), 2)
+                            "avg_response_time": round(float(stat['avg_response_time'] or 0.0), 2)
                         })
                     
                     api_key_stats.append({
@@ -316,10 +319,10 @@ def get_user_stats_time_series(
                 time_series_query = f"""
                     SELECT 
                         DATE_FORMAT(date, '{date_format}') as time_label,
-                        SUM(total_requests) as total_requests,
-                        SUM(successful_requests) as success_requests,
-                        SUM(failed_requests) as failed_requests,
-                        AVG(avg_response_time) as avg_response_time
+                        COALESCE(SUM(total_requests), 0) as total_requests,
+                        COALESCE(SUM(successful_requests), 0) as success_requests,
+                        COALESCE(SUM(failed_requests), 0) as failed_requests,
+                        COALESCE(AVG(avg_response_time), 0.0) as avg_response_time
                     FROM daily_user_api_stats
                     WHERE user_id = %s AND {date_filter} {api_key_filter}
                     GROUP BY {group_by}
