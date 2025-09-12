@@ -454,13 +454,13 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 # 현재 사용량 조회 (daily_user_api_stats 테이블에서)
                 now = datetime.now()
                 
-                # 오늘 사용량 조회
+                # 오늘 사용량 조회 (NULL 값 안전 처리)
                 cursor.execute(
                     """
                     SELECT 
-                        SUM(total_requests) as total_requests,
-                        SUM(successful_requests) as successful_requests,
-                        SUM(failed_requests) as failed_requests
+                        COALESCE(SUM(total_requests), 0) as total_requests,
+                        COALESCE(SUM(successful_requests), 0) as successful_requests,
+                        COALESCE(SUM(failed_requests), 0) as failed_requests
                     FROM daily_user_api_stats 
                     WHERE user_id = %s AND date = CURDATE()
                     """,
@@ -474,9 +474,9 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 cursor.execute(
                     """
                     SELECT 
-                        SUM(total_requests) as total_requests,
-                        SUM(successful_requests) as successful_requests,
-                        SUM(failed_requests) as failed_requests
+                        COALESCE(SUM(total_requests), 0) as total_requests,
+                        COALESCE(SUM(successful_requests), 0) as successful_requests,
+                        COALESCE(SUM(failed_requests), 0) as failed_requests
                     FROM daily_user_api_stats 
                     WHERE user_id = %s AND date >= %s
                     """,
@@ -485,11 +485,11 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 
                 month_usage = cursor.fetchone()
                 
-                # 현재 사용량 (기본값 0)
+                # 현재 사용량 (기본값 0, NULL 값 안전 처리)
                 current_usage = {
                     "perMinute": 0,  # 분당 사용량은 별도 추적 필요
-                    "perDay": today_usage.get("total_requests", 0) if today_usage else 0,
-                    "perMonth": month_usage.get("total_requests", 0) if month_usage else 0
+                    "perDay": int(today_usage.get("total_requests") or 0) if today_usage else 0,
+                    "perMonth": int(month_usage.get("total_requests") or 0) if month_usage else 0
                 }
                 
                 # 리셋 시간 계산
@@ -505,17 +505,25 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                     "perMonth": next_month
                 }
                 
-                # 상태 판단
+                # 상태 판단 (안전한 숫자 비교)
                 status = "normal"
-                if current_usage["perMinute"] >= limits["perMinute"] * 0.9:
+                per_minute_usage = int(current_usage.get("perMinute") or 0)
+                per_day_usage = int(current_usage.get("perDay") or 0)
+                per_month_usage = int(current_usage.get("perMonth") or 0)
+                
+                per_minute_limit = int(limits.get("perMinute") or 60)
+                per_day_limit = int(limits.get("perDay") or 1000)
+                per_month_limit = int(limits.get("perMonth") or 30000)
+                
+                if per_minute_usage >= per_minute_limit * 0.9:
                     status = "warning"
-                if current_usage["perDay"] >= limits["perDay"] * 0.9:
+                if per_day_usage >= per_day_limit * 0.9:
                     status = "warning"
-                if current_usage["perMonth"] >= limits["perMonth"] * 0.9:
+                if per_month_usage >= per_month_limit * 0.9:
                     status = "critical"
-                if (current_usage["perMinute"] >= limits["perMinute"] or 
-                    current_usage["perDay"] >= limits["perDay"] or 
-                    current_usage["perMonth"] >= limits["perMonth"]):
+                if (per_minute_usage >= per_minute_limit or 
+                    per_day_usage >= per_day_limit or 
+                    per_month_usage >= per_month_limit):
                     status = "exceeded"
                 
                 return {
