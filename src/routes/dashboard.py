@@ -485,9 +485,22 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 
                 month_usage = cursor.fetchone()
                 
+                # 분당 사용량 조회 (최근 1분간 요청 수)
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) as minute_requests
+                    FROM api_request_logs arl
+                    JOIN api_keys ak ON arl.api_key = ak.key_id
+                    WHERE ak.user_id = %s 
+                    AND arl.created_at >= DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+                    """,
+                    (current_user["id"],)
+                )
+                minute_usage = cursor.fetchone()
+                
                 # 현재 사용량 (기본값 0, NULL 값 안전 처리)
                 current_usage = {
-                    "perMinute": 0,  # 분당 사용량은 별도 추적 필요
+                    "perMinute": int(minute_usage.get("minute_requests") or 0) if minute_usage else 0,
                     "perDay": int(today_usage.get("total_requests") or 0) if today_usage else 0,
                     "perMonth": int(month_usage.get("total_requests") or 0) if month_usage else 0
                 }
