@@ -637,3 +637,99 @@ def cleanup_duplicates(request: Request, current_user = Depends(require_auth)):
     except Exception as e:
         print(f"중복 데이터 정리 실패: {e}")
         raise HTTPException(status_code=500, detail="중복 데이터 정리에 실패했습니다")
+
+@router.get("/dashboard/error-analysis")
+def get_error_analysis(
+    request: Request,
+    period: str = Query("7days", description="분석 기간: 1day, 7days, 30days"),
+    api_key: Optional[str] = Query(None, description="특정 API 키 필터"),
+    current_user = Depends(require_auth)
+):
+    """오류 유형 분석 데이터 조회"""
+    try:
+        user_id = current_user["id"]
+        
+        # 기간별 날짜 필터 생성
+        if period == "1day":
+            date_filter = "DATE(arl.created_at) = CURDATE()"
+        elif period == "7days":
+            date_filter = "arl.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+        elif period == "30days":
+            date_filter = "arl.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+        else:
+            date_filter = "arl.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"  # 기본값
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # API 키 필터 조건
+                api_key_filter = ""
+                params = [user_id]
+                if api_key:
+                    api_key_filter = "AND ak.key_id = %s"
+                    params.append(api_key)
+                
+                # 오류 유형별 집계 쿼리
+                error_query = f"""
+                    SELECT 
+                        CASE 
+                            WHEN arl.status_code >= 400 AND arl.status_code < 500 THEN '4xx_client_error'
+                            WHEN arl.status_code >= 500 AND arl.status_code < 600 THEN '5xx_server_error'
+                            WHEN arl.response_time > 5000 THEN 'timeout'
+                            WHEN arl.status_code < 200 OR arl.status_code >= 300 THEN 'other_error'
+                            ELSE 'success'
+                        END as error_type,
+                        COUNT(*) as error_count
+                    FROM api_request_logs arl
+                    JOIN api_keys ak ON arl.api_key = ak.key_id
+                    WHERE ak.user_id = %s 
+                    AND {date_filter}
+                    {api_key_filter}
+                    GROUP BY error_type
+                    ORDER BY error_count DESC
+                """
+                
+                cursor.execute(error_query, params)
+                error_results = cursor.fetchall()
+                
+                # 전체 요청 수 계산
+                total_requests = sum(row['error_count'] for row in error_results)
+                
+                # 오류 유형 매핑
+                error_type_names = {
+                    '4xx_client_error': '클라이언트 오류 (4xx)',
+                    '5xx_server_error': '서버 오류 (5xx)', 
+                    'timeout': '타임아웃 (>5초)',
+                    'other_error': '기타 오류',
+                    'success': '성공'
+                }
+                
+                # 결과 가공
+                error_analysis = []
+                for row in error_results:
+                    error_type = row['error_type']
+                    count = int(row['error_count'])
+                    percentage = (count / total_requests * 100) if total_requests > 0 else 0
+                    
+                    # 성공 요청은 제외 (오류 분석이므로)
+                    if error_type != 'success':
+                        error_analysis.append({
+                            "type": error_type_names.get(error_type, error_type),
+                            "count": count,
+                            "percentage": round(percentage, 1)
+                        })
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "error_types": error_analysis,
+                        "total_requests": total_requests,
+                        "period": period,
+                        "api_key": api_key
+                    }
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"오류 분석 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"오류 분석 조회에 실패했습니다: {str(e)}")
