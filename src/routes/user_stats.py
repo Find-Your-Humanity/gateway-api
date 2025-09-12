@@ -100,6 +100,9 @@ def get_user_stats_overview(
                             "failed_requests": 0,
                             "success_rate": 0.0,
                             "avg_response_time": 0.0,
+                            "peak_daily_requests": 0,
+                            "peak_date": None,
+                            "captcha_types": [],
                             "period": period
                         }
                     }
@@ -123,6 +126,23 @@ def get_user_stats_overview(
                 # 성공률 계산
                 success_rate = (overview['success_requests'] / overview['total_requests'] * 100) if overview['total_requests'] > 0 else 0
                 
+                # 3. 최고 일일 요청수 조회
+                peak_query = f"""
+                    SELECT 
+                        DATE_FORMAT(date, '%Y-%m-%d') as peak_date,
+                        SUM(total_requests) as daily_total
+                    FROM daily_user_api_stats
+                    WHERE user_id = %s AND {get_date_filter(period)}
+                    GROUP BY date
+                    ORDER BY daily_total DESC
+                    LIMIT 1
+                """
+                cursor.execute(peak_query, (user_id,))
+                peak_result = cursor.fetchone()
+                
+                peak_daily_requests = int(peak_result['daily_total'] or 0) if peak_result else 0
+                peak_date = peak_result['peak_date'] if peak_result else None
+                
                 # 캡차 타입별 통계 포맷팅
                 captcha_types = []
                 for stat in type_stats:
@@ -144,6 +164,8 @@ def get_user_stats_overview(
                         "failed_requests": overview['failed_requests'],
                         "success_rate": round(success_rate, 2),
                         "avg_response_time": round(float(overview['avg_response_time'] or 0), 2),
+                        "peak_daily_requests": peak_daily_requests,
+                        "peak_date": peak_date,
                         "captcha_types": captcha_types,
                         "period": period
                     }
