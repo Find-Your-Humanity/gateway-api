@@ -35,13 +35,19 @@ def refresh_token(request: Request, response: Response):
     try:
         raw = request.cookies.get("captcha_refresh")
         if not raw:
+            logger.error("리프레시 토큰이 없습니다")
             raise HTTPException(status_code=401, detail="리프레시 토큰이 없습니다.")
 
+        logger.info(f"리프레시 토큰 갱신 시도: {raw[:10]}...")
+        
         result = verify_and_rotate_refresh_token(raw_token=raw, rotate=True)
         if not result:
+            logger.error("리프레시 토큰이 유효하지 않습니다")
             raise HTTPException(status_code=401, detail="리프레시 토큰이 유효하지 않습니다.")
 
         user_id = result["user_id"]
+        logger.info(f"리프레시 토큰 검증 성공: 사용자 {user_id}")
+        
         # 새 액세스 토큰 발급
         from datetime import timedelta
         access = create_access_token({"sub": str(user_id)}, expires_delta=timedelta(minutes=30))
@@ -69,11 +75,14 @@ def refresh_token(request: Request, response: Response):
                 samesite="none",
                 max_age=60 * 60 * 24 * 14
             )
+            logger.info("새 리프레시 토큰으로 교체됨")
 
+        logger.info(f"토큰 갱신 완료: 사용자 {user_id}")
         return {"success": True, "access_token": access}
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"토큰 갱신 실패: {e}")
         raise HTTPException(status_code=500, detail=f"refresh 실패: {e}")
 
 
