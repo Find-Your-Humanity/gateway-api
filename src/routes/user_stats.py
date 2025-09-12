@@ -36,16 +36,16 @@ class UserStatsResponse(BaseModel):
     success: bool
     data: Dict[str, Any]
 
-def get_date_filter(period: str) -> str:
+def get_date_filter(period: str, table_alias: str = "arl") -> str:
     """기간에 따른 날짜 필터 조건 반환"""
     if period == "today":
-        return "DATE(created_at) = CURDATE()"
+        return f"DATE({table_alias}.created_at) = CURDATE()"
     elif period == "week":
-        return "created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+        return f"{table_alias}.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
     elif period == "month":
-        return "created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+        return f"{table_alias}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
     else:
-        return "created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"  # 기본값: 한달
+        return f"{table_alias}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"  # 기본값: 한달
 
 @router.get("/user/stats/overview")
 def get_user_stats_overview(
@@ -283,16 +283,16 @@ def get_user_stats_time_series(
                 # 기간에 따른 그룹화 설정
                 if period == "today":
                     date_format = "%H:00"
-                    date_filter = "DATE(created_at) = CURDATE()"
-                    group_by = "HOUR(created_at)"
+                    date_filter = "DATE(arl.created_at) = CURDATE()"
+                    group_by = "HOUR(arl.created_at)"
                 elif period == "week":
                     date_format = "%Y-%m-%d"
-                    date_filter = "created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
-                    group_by = "DATE(created_at)"
+                    date_filter = "arl.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+                    group_by = "DATE(arl.created_at)"
                 else:  # month
                     date_format = "%Y-%m-%d"
-                    date_filter = "created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
-                    group_by = "DATE(created_at)"
+                    date_filter = "arl.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+                    group_by = "DATE(arl.created_at)"
                 
                 # API 키 필터 추가
                 api_key_filter = ""
