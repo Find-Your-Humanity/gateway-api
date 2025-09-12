@@ -127,12 +127,13 @@ def get_user_stats_overview(
                 success_rate = (overview['success_requests'] / overview['total_requests'] * 100) if overview['total_requests'] > 0 else 0
                 
                 # 3. 최고 일일 요청수 조회
+                date_filter_condition = get_date_filter(period)
                 peak_query = f"""
                     SELECT 
-                        DATE_FORMAT(date, '%Y-%m-%d') as peak_date,
+                        DATE_FORMAT(date, '%%Y-%%m-%%d') as peak_date,
                         SUM(total_requests) as daily_total
                     FROM daily_user_api_stats
-                    WHERE user_id = %s AND {get_date_filter(period)}
+                    WHERE user_id = %s AND {date_filter_condition}
                     GROUP BY date
                     ORDER BY daily_total DESC
                     LIMIT 1
