@@ -703,20 +703,30 @@ def get_error_analysis(
                     'success': '성공'
                 }
                 
-                # 결과 가공
-                error_analysis = []
+                # 모든 오류 유형을 기본값 0으로 초기화
+                all_error_types = ['4xx_client_error', '5xx_server_error', 'timeout', 'other_error']
+                error_data = {error_type: 0 for error_type in all_error_types}
+                
+                # 실제 데이터로 업데이트
                 for row in error_results:
                     error_type = row['error_type']
-                    count = int(row['error_count'])
-                    percentage = (count / total_requests * 100) if total_requests > 0 else 0
+                    if error_type in error_data:  # 성공 요청은 제외
+                        error_data[error_type] = int(row['error_count'])
+                
+                # 전체 오류 수 계산 (성공 제외)
+                total_errors = sum(error_data.values())
+                
+                # 결과 가공 - 항상 4가지 유형 모두 표시
+                error_analysis = []
+                for error_type in all_error_types:
+                    count = error_data[error_type]
+                    percentage = (count / total_errors * 100) if total_errors > 0 else 0
                     
-                    # 성공 요청은 제외 (오류 분석이므로)
-                    if error_type != 'success':
-                        error_analysis.append({
-                            "type": error_type_names.get(error_type, error_type),
-                            "count": count,
-                            "percentage": round(percentage, 1)
-                        })
+                    error_analysis.append({
+                        "type": error_type_names.get(error_type, error_type),
+                        "count": count,
+                        "percentage": round(percentage, 1)
+                    })
                 
                 return {
                     "success": True,
