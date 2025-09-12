@@ -382,3 +382,98 @@ def get_user_stats_time_series(
     except Exception as e:
         logger.error(f"시계열 통계 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=f"시계열 통계 조회에 실패했습니다: {str(e)}")
+
+@router.get("/user/stats/hourly-chart")
+def get_user_hourly_chart_data(
+    request: Request,
+    period: str = Query("today", description="통계 기간: today, week, month")
+):
+    """시간별/일별 차트 데이터 조회"""
+    try:
+        # 사용자 인증 확인
+        current_user = get_current_user_from_request(request)
+        if not current_user:
+            raise HTTPException(status_code=401, detail="인증이 필요합니다")
+        
+        user_id = current_user.get("id")
+        logger.info(f"시간별 차트 데이터 조회 시작: 사용자 {user_id}, 기간 {period}")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                if period == "today":
+                    # 오늘 시간별 데이터 (0~23시, 2시간 단위로 집계)
+                    chart_query = """
+                        SELECT 
+                            FLOOR(HOUR(arl.created_at) / 2) * 2 as hour_group,
+                            COUNT(*) as total_requests,
+                            COALESCE(SUM(CASE WHEN arl.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) as success_requests,
+                            COALESCE(SUM(CASE WHEN arl.status_code >= 400 THEN 1 ELSE 0 END), 0) as failed_requests
+                        FROM api_request_logs arl
+                        JOIN api_keys ak ON arl.api_key = ak.key_id
+                        WHERE ak.user_id = %s AND DATE(arl.created_at) = CURDATE()
+                        GROUP BY hour_group
+                        ORDER BY hour_group
+                    """
+                    cursor.execute(chart_query, (user_id,))
+                    raw_data = cursor.fetchall()
+                    
+                    # 0~23시 데이터를 2시간 단위로 생성 (00, 02, 04, ..., 22)
+                    chart_data = []
+                    data_dict = {int(row['hour_group']): row for row in raw_data}
+                    
+                    for hour in range(0, 24, 2):
+                        if hour in data_dict:
+                            row = data_dict[hour]
+                            chart_data.append({
+                                "time": f"{hour:02d}시",
+                                "requests": int(row['total_requests']),
+                                "success": int(row['success_requests']),
+                                "failed": int(row['failed_requests'])
+                            })
+                        else:
+                            chart_data.append({
+                                "time": f"{hour:02d}시",
+                                "requests": 0,
+                                "success": 0,
+                                "failed": 0
+                            })
+                    
+                else:
+                    # week/month는 일별 데이터
+                    date_filter = get_date_filter(period, "daily_user_api_stats")
+                    chart_query = f"""
+                        SELECT 
+                            DATE_FORMAT(date, '%%m/%%d') as time_label,
+                            COALESCE(SUM(total_requests), 0) as total_requests,
+                            COALESCE(SUM(successful_requests), 0) as success_requests,
+                            COALESCE(SUM(failed_requests), 0) as failed_requests
+                        FROM daily_user_api_stats
+                        WHERE user_id = %s AND {date_filter}
+                        GROUP BY date
+                        ORDER BY date
+                    """
+                    cursor.execute(chart_query, (user_id,))
+                    raw_data = cursor.fetchall()
+                    
+                    chart_data = []
+                    for row in raw_data:
+                        chart_data.append({
+                            "time": row['time_label'],
+                            "requests": int(row['total_requests']),
+                            "success": int(row['success_requests']),
+                            "failed": int(row['failed_requests'])
+                        })
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "chart_data": chart_data,
+                        "period": period
+                    }
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"시간별 차트 데이터 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"차트 데이터 조회에 실패했습니다: {str(e)}")
