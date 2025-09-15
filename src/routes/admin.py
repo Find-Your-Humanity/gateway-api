@@ -1715,23 +1715,34 @@ def get_admin_dashboard_metrics(request: Request):
                 """)
                 active_users = cursor.fetchone()["active_users"] or 0
                 
-                # 4. 총 요청 수 및 성공률 - 통합 로그 테이블 사용
+                # 4. 캡차 생성 통계 (api_request_logs)
                 cursor.execute("""
                     SELECT 
-                        COUNT(*) as total_requests,
-                        COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_count
-                    FROM (
-                        SELECT status_code FROM request_logs
-                        UNION ALL
-                        SELECT status_code FROM api_request_logs
-                    ) as combined_logs
+                        COUNT(*) as total_generated,
+                        COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_generated
+                    FROM api_request_logs
                 """)
-                request_stats = cursor.fetchone()
-                total_requests = request_stats["total_requests"] or 0
-                success_count = request_stats["success_count"] or 0
-                success_rate = (success_count / total_requests * 100) if total_requests > 0 else 0
+                generated_stats = cursor.fetchone()
+                total_generated = generated_stats["total_generated"] or 0
+                success_generated = generated_stats["success_generated"] or 0
+                generated_success_rate = (success_generated / total_generated * 100) if total_generated > 0 else 0
                 
-                # 5. 월간 수익 (이번 달 결제 완료 금액)
+                # 5. 캡차 해결 통계 (request_logs)
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_solved,
+                        COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END), 0) as success_solved
+                    FROM request_logs
+                """)
+                solved_stats = cursor.fetchone()
+                total_solved = solved_stats["total_solved"] or 0
+                success_solved = solved_stats["success_solved"] or 0
+                solved_success_rate = (success_solved / total_solved * 100) if total_solved > 0 else 0
+                
+                # 6. 전환율 계산 (해결/생성)
+                conversion_rate = (total_solved / total_generated * 100) if total_generated > 0 else 0
+                
+                # 7. 월간 수익 (이번 달 결제 완료 금액)
                 cursor.execute("""
                     SELECT COALESCE(SUM(amount), 0) as revenue
                     FROM payment_logs 
@@ -1740,7 +1751,7 @@ def get_admin_dashboard_metrics(request: Request):
                 """)
                 revenue = cursor.fetchone()["revenue"]
                 
-                # 6. 플랜별 사용자 분포
+                # 8. 플랜별 사용자 분포
                 # 먼저 모든 플랜 조회
                 cursor.execute("""
                     SELECT id, display_name, name
@@ -1796,8 +1807,15 @@ def get_admin_dashboard_metrics(request: Request):
                         "totalUsers": total_users,
                         "newUsersToday": new_users_today,
                         "activeUsers": active_users,
-                        "totalRequests": total_requests,
-                        "successRate": round(success_rate, 1),
+                        # 캡차 생성 통계
+                        "totalGenerated": total_generated,
+                        "generatedSuccessRate": round(generated_success_rate, 1),
+                        # 캡차 해결 통계
+                        "totalSolved": total_solved,
+                        "solvedSuccessRate": round(solved_success_rate, 1),
+                        # 전환율
+                        "conversionRate": round(conversion_rate, 1),
+                        # 기타
                         "revenue": revenue,
                         "planDistribution": plan_distribution
                     }
@@ -2040,31 +2058,68 @@ async def get_system_stats(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 일별 시스템 통계 조회 (request_logs만 사용)
+                # 일별 캡차 생성 통계 (api_request_logs)
+                cursor.execute("""
+                    SELECT 
+                        DATE(created_at) as date,
+                        COUNT(*) as total_generated,
+                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as successful_generated,
+                        SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed_generated,
+                        COUNT(DISTINCT user_id) as active_users_generated
+                    FROM api_request_logs 
+                    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
+                    GROUP BY DATE(created_at)
+                    ORDER BY date DESC
+                """, (days,))
+                
+                generated_stats = cursor.fetchall()
+                
+                # 일별 캡차 해결 통계 (request_logs)
                 cursor.execute("""
                     SELECT 
                         DATE(request_time) as date,
-                        COUNT(*) as total_requests,
-                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as successful_requests,
-                        SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed_requests,
-                        COUNT(DISTINCT user_id) as active_users
+                        COUNT(*) as total_solved,
+                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as successful_solved,
+                        SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed_solved,
+                        COUNT(DISTINCT user_id) as active_users_solved
                     FROM request_logs 
                     WHERE request_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
                     GROUP BY DATE(request_time)
                     ORDER BY date DESC
                 """, (days,))
                 
-                stats = cursor.fetchall()
+                solved_stats = cursor.fetchall()
+                
+                # 두 통계를 날짜별로 합치기
+                generated_dict = {stat['date']: stat for stat in generated_stats}
+                solved_dict = {stat['date']: stat for stat in solved_stats}
+                
+                # 모든 날짜 수집
+                all_dates = set(generated_dict.keys()) | set(solved_dict.keys())
                 
                 # 데이터 포맷팅
                 formatted_stats = []
-                for stat in stats:
+                for date in sorted(all_dates, reverse=True):
+                    generated = generated_dict.get(date, {})
+                    solved = solved_dict.get(date, {})
+                    
                     formatted_stats.append({
-                        "date": stat['date'].strftime('%Y-%m-%d'),
-                        "totalRequests": stat['total_requests'],
-                        "successfulRequests": stat['successful_requests'],
-                        "failedRequests": stat['failed_requests'],
-                        "activeUsers": stat['active_users']
+                        "date": date.strftime('%Y-%m-%d'),
+                        # 생성 통계
+                        "totalGenerated": generated.get('total_generated', 0),
+                        "successfulGenerated": generated.get('successful_generated', 0),
+                        "failedGenerated": generated.get('failed_generated', 0),
+                        # 해결 통계
+                        "totalSolved": solved.get('total_solved', 0),
+                        "successfulSolved": solved.get('successful_solved', 0),
+                        "failedSolved": solved.get('failed_solved', 0),
+                        # 활성 사용자 (두 테이블 중 최대값 사용)
+                        "activeUsers": max(
+                            generated.get('active_users_generated', 0),
+                            solved.get('active_users_solved', 0)
+                        ),
+                        # 전환율
+                        "conversionRate": (solved.get('total_solved', 0) / generated.get('total_generated', 1) * 100) if generated.get('total_generated', 0) > 0 else 0
                     })
                 
                 return {
