@@ -2157,7 +2157,7 @@ async def get_hourly_stats(
     """
     try:
         # 관리자 권한 확인
-        if not current_user.get("is_admin"):
+        if not current_user or not current_user.get("is_admin"):
             raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
         
         logger.info(f"시간별 통계 조회 시작: 날짜 {date}")
