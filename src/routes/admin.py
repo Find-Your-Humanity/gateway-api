@@ -1739,8 +1739,19 @@ def get_admin_dashboard_metrics(request: Request):
                 success_solved = solved_stats["success_solved"] or 0
                 solved_success_rate = (success_solved / total_solved * 100) if total_solved > 0 else 0
                 
-                # 6. 전환율 계산 (해결/생성)
-                conversion_rate = (total_solved / total_generated * 100) if total_generated > 0 else 0
+                # 6. 해결 완료율 계산 (해결/생성)
+                completion_rate = (total_solved / total_generated * 100) if total_generated > 0 else 0
+                
+                # 7. 평균 응답시간 계산 (두 테이블 통합)
+                cursor.execute("""
+                    SELECT AVG(response_time) as avg_response_time
+                    FROM (
+                        SELECT response_time FROM request_logs
+                        UNION ALL
+                        SELECT response_time FROM api_request_logs
+                    ) as combined_logs
+                """)
+                avg_response_time = cursor.fetchone()["avg_response_time"] or 0
                 
                 # 7. 월간 수익 (이번 달 결제 완료 금액)
                 cursor.execute("""
@@ -1813,8 +1824,10 @@ def get_admin_dashboard_metrics(request: Request):
                         # 캡차 해결 통계
                         "totalSolved": total_solved,
                         "solvedSuccessRate": round(solved_success_rate, 1),
-                        # 전환율
-                        "conversionRate": round(conversion_rate, 1),
+                        # 해결 완료율
+                        "completionRate": round(completion_rate, 1),
+                        # 평균 응답시간
+                        "avgResponseTime": round(avg_response_time, 2),
                         # 기타
                         "revenue": revenue,
                         "planDistribution": plan_distribution
@@ -2118,8 +2131,8 @@ async def get_system_stats(
                             generated.get('active_users_generated', 0),
                             solved.get('active_users_solved', 0)
                         ),
-                        # 전환율
-                        "conversionRate": (solved.get('total_solved', 0) / generated.get('total_generated', 1) * 100) if generated.get('total_generated', 0) > 0 else 0
+                        # 해결 완료율
+                        "completionRate": (solved.get('total_solved', 0) / generated.get('total_generated', 1) * 100) if generated.get('total_generated', 0) > 0 else 0
                     })
                 
                 return {
