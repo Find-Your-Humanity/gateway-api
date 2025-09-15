@@ -2320,6 +2320,49 @@ async def get_current_active_users(
         raise HTTPException(status_code=500, detail="활성 사용자 수를 불러올 수 없습니다.")
 
 
+@router.get("/admin/active-users")
+async def get_active_users(
+    days: int = Query(7, description="조회할 일수 (기본값: 7일)"),
+    current_user: dict = Depends(get_current_user_from_request)
+):
+    """
+    기간 내 활성 사용자 수 (distinct user_id) 반환
+    - request_logs.request_time 과 api_request_logs.created_at 기준
+    """
+    try:
+        if not current_user or not current_user.get('is_admin'):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT COUNT(DISTINCT user_id) AS active_users
+                    FROM (
+                        SELECT user_id
+                        FROM request_logs
+                        WHERE request_time >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                        AND user_id IS NOT NULL
+                        UNION ALL
+                        SELECT user_id
+                        FROM api_request_logs
+                        WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                        AND user_id IS NOT NULL
+                    ) AS u
+                    """,
+                    (days, days),
+                )
+                row = cursor.fetchone()
+                active_users = (row[0] if not isinstance(row, dict) else row.get('active_users')) or 0
+
+                return {"success": True, "data": {"days": days, "activeUsers": int(active_users)}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"기간 내 활성 사용자 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="기간 내 활성 사용자 수를 불러올 수 없습니다.")
+
+
 @router.get("/admin/user-growth")
 async def get_user_growth(
     months: int = Query(6, description="조회할 월수 (기본값: 6개월)"),

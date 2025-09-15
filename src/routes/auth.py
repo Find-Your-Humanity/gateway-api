@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Response, Request
+from fastapi import APIRouter, HTTPException, Response, Request, Depends
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
@@ -677,3 +677,66 @@ async def google_callback(code: str, response: Response):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Google OAuth 처리 실패: {e}")
+
+# ===== Me / Profile =====
+from pydantic import BaseModel
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+
+
+@router.put("/auth/me")
+def update_me(req: UpdateProfileRequest, request: Request):
+    """사용자 본인 프로필 업데이트 (현재는 name만)."""
+    try:
+        user = get_current_user_from_request(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="인증이 필요합니다")
+        if req.name is None or len(req.name.strip()) == 0:
+            raise HTTPException(status_code=400, detail="이름은 비워둘 수 없습니다.")
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE users SET name=%s WHERE id=%s", (req.name.strip(), user["id"]))
+                cursor.execute(
+                    "SELECT id, email, username, name, is_admin FROM users WHERE id=%s",
+                    (user["id"],),
+                )
+                row = cursor.fetchone()
+                updated = {
+                    "id": row[0] if not isinstance(row, dict) else row.get("id"),
+                    "email": row[1] if not isinstance(row, dict) else row.get("email"),
+                    "username": row[2] if not isinstance(row, dict) else row.get("username"),
+                    "name": row[3] if not isinstance(row, dict) else row.get("name"),
+                    "is_admin": row[4] if not isinstance(row, dict) else row.get("is_admin"),
+                }
+                return {"success": True, "user": updated}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"프로필 업데이트 중 오류: {e}")
+
+
+@router.delete("/auth/me")
+def delete_me(response: Response, request: Request):
+    """사용자 본인 탈퇴 (soft delete: is_active = FALSE) 및 리프레시 토큰 회수."""
+    try:
+        user = get_current_user_from_request(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="인증이 필요합니다")
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE users SET is_active=FALSE WHERE id=%s", (user["id"],))
+                try:
+                    cursor.execute("UPDATE refresh_tokens SET is_revoked=TRUE WHERE user_id=%s", (user["id"],))
+                except Exception:
+                    pass
+
+        response.delete_cookie(key="captcha_token", domain=".realcatcha.com", samesite="none", secure=True)
+        response.delete_cookie(key="captcha_refresh", domain=".realcatcha.com", samesite="none", secure=True)
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"회원 탈퇴 처리 중 오류: {e}")
