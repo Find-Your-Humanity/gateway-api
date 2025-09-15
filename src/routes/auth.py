@@ -697,9 +697,15 @@ def update_me(req: UpdateProfileRequest, request: Request):
 
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("UPDATE users SET name=%s WHERE id=%s", (req.name.strip(), user["id"]))
+                # OAuth 사용자는 name 업데이트, 일반 로그인은 username/name 동시 업데이트
+                oauth_provider = user.get("oauth_provider") if isinstance(user, dict) else None
+                if oauth_provider == "google":
+                    cursor.execute("UPDATE users SET name=%s WHERE id=%s", (req.name.strip(), user["id"]))
+                else:
+                    cursor.execute("UPDATE users SET username=%s, name=%s WHERE id=%s", (req.name.strip(), req.name.strip(), user["id"]))
+
                 cursor.execute(
-                    "SELECT id, email, username, name, is_admin FROM users WHERE id=%s",
+                    "SELECT id, email, username, name, is_admin, oauth_provider FROM users WHERE id=%s",
                     (user["id"],),
                 )
                 row = cursor.fetchone()
@@ -709,6 +715,7 @@ def update_me(req: UpdateProfileRequest, request: Request):
                     "username": row[2] if not isinstance(row, dict) else row.get("username"),
                     "name": row[3] if not isinstance(row, dict) else row.get("name"),
                     "is_admin": row[4] if not isinstance(row, dict) else row.get("is_admin"),
+                    "oauth_provider": row[5] if not isinstance(row, dict) else row.get("oauth_provider"),
                 }
                 return {"success": True, "user": updated}
     except HTTPException:
