@@ -2212,6 +2212,114 @@ async def get_hourly_stats(
         raise HTTPException(status_code=500, detail="시간별 통계 데이터를 불러올 수 없습니다.")
 
 
+@router.get("/admin/performance-stats")
+async def get_performance_stats(
+    days: int = Query(7, description="조회할 일수 (기본값: 7일)"),
+    current_user: dict = Depends(get_current_user_from_request)
+):
+    """
+    성능 분석 통계 조회 (평균 응답시간, 성공률, 에러율, 처리량)
+    """
+    try:
+        # 관리자 권한 확인
+        if not current_user or not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        logger.info(f"성능 분석 통계 조회 시작: {days}일")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 일별 성능 통계 조회
+                cursor.execute("""
+                    SELECT 
+                        DATE(created_at) as date,
+                        COUNT(*) as total_requests,
+                        AVG(response_time) as avg_response_time,
+                        SUM(CASE WHEN status_code BETWEEN 200 AND 399 THEN 1 ELSE 0 END) as successful_requests,
+                        SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as failed_requests,
+                        COUNT(DISTINCT user_id) as active_users
+                    FROM api_request_logs 
+                    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
+                    GROUP BY DATE(created_at)
+                    ORDER BY date DESC
+                """, (days,))
+                
+                performance_stats = cursor.fetchall()
+                
+                formatted_stats = []
+                for stat in performance_stats:
+                    total_requests = stat['total_requests'] or 0
+                    successful_requests = stat['successful_requests'] or 0
+                    failed_requests = stat['failed_requests'] or 0
+                    avg_response_time = stat['avg_response_time'] or 0
+                    
+                    success_rate = (successful_requests / total_requests * 100) if total_requests > 0 else 0
+                    error_rate = (failed_requests / total_requests * 100) if total_requests > 0 else 0
+                    
+                    formatted_stats.append({
+                        "date": stat['date'].strftime('%Y-%m-%d'),
+                        "avgResponseTime": round(avg_response_time, 2),
+                        "successRate": round(success_rate, 1),
+                        "errorRate": round(error_rate, 1),
+                        "throughput": total_requests,  # 처리량 (요청 수)
+                        "activeUsers": stat['active_users'] or 0
+                    })
+                
+                return {
+                    "success": True,
+                    "data": formatted_stats
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"성능 분석 통계 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="성능 분석 통계 데이터를 불러올 수 없습니다.")
+
+
+@router.get("/admin/current-active-users")
+async def get_current_active_users(
+    current_user: dict = Depends(get_current_user_from_request)
+):
+    """
+    현재 활성 사용자 수 조회 (최근 1시간 내 요청한 사용자)
+    """
+    try:
+        # 관리자 권한 확인
+        if not current_user or not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 현재 활성 사용자 (최근 1시간 내 요청한 사용자)
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT user_id) as active_users
+                    FROM (
+                        SELECT user_id FROM request_logs 
+                        WHERE request_time >= NOW() - INTERVAL 1 HOUR
+                        AND user_id IS NOT NULL
+                        UNION ALL
+                        SELECT user_id FROM api_request_logs 
+                        WHERE created_at >= NOW() - INTERVAL 1 HOUR
+                        AND user_id IS NOT NULL
+                    ) as combined_logs
+                """)
+                active_users = cursor.fetchone()["active_users"] or 0
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "activeUsers": active_users
+                    }
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"현재 활성 사용자 수 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="활성 사용자 수를 불러올 수 없습니다.")
+
+
 @router.get("/admin/user-growth")
 async def get_user_growth(
     months: int = Query(6, description="조회할 월수 (기본값: 6개월)"),
