@@ -2147,6 +2147,71 @@ async def get_system_stats(
         raise HTTPException(status_code=500, detail="시스템 통계 데이터를 불러올 수 없습니다.")
 
 
+@router.get("/admin/hourly-stats")
+async def get_hourly_stats(
+    date: str = Query(..., description="조회할 날짜 (YYYY-MM-DD 형식)"),
+    current_user: dict = Depends(get_current_user_from_request)
+):
+    """
+    특정 날짜의 시간별 시스템 통계 조회
+    """
+    try:
+        # 관리자 권한 확인
+        if not current_user.get("is_admin"):
+            raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다")
+        
+        logger.info(f"시간별 통계 조회 시작: 날짜 {date}")
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # 해당 날짜의 시간별 API 요청 통계 (api_request_logs)
+                cursor.execute("""
+                    SELECT 
+                        HOUR(created_at) as hour,
+                        COUNT(*) as total_requests,
+                        COUNT(DISTINCT user_id) as active_users
+                    FROM api_request_logs 
+                    WHERE DATE(created_at) = %s
+                    GROUP BY HOUR(created_at)
+                    ORDER BY hour
+                """, (date,))
+                
+                hourly_data = cursor.fetchall()
+                
+                # 0~23시 데이터 생성 (없는 시간대는 0으로 채움)
+                chart_data = []
+                data_dict = {row['hour']: row for row in hourly_data}
+                
+                for hour in range(24):
+                    if hour in data_dict:
+                        row = data_dict[hour]
+                        chart_data.append({
+                            "time": f"{hour:02d}:00",
+                            "requests": int(row['total_requests']),
+                            "users": int(row['active_users'])
+                        })
+                    else:
+                        chart_data.append({
+                            "time": f"{hour:02d}:00",
+                            "requests": 0,
+                            "users": 0
+                        })
+                
+                return {
+                    "success": True,
+                    "data": {
+                        "date": date,
+                        "hourlyStats": chart_data
+                    }
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"시간별 통계 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail="시간별 통계 데이터를 불러올 수 없습니다.")
+
+
 @router.get("/admin/user-growth")
 async def get_user_growth(
     months: int = Query(6, description="조회할 월수 (기본값: 6개월)"),
