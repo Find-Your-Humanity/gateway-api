@@ -12,6 +12,29 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Suspicious IP Management"])
 
+
+def _resolve_user_id_from_request(request: Request) -> int:
+    """세션 우선, 없으면 X-API-Key로 user_id 유도. 실패 시 401."""
+    try:
+        current_user = get_current_user_from_request(request)
+        if isinstance(current_user, dict):
+            user_id = current_user.get("id") or current_user.get("user_id")
+            if user_id:
+                return int(user_id)
+    except Exception:
+        pass
+
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            return int(row["user_id"] if isinstance(row, dict) else row[0])
+
 @router.get("/my-api-keys")
 async def get_my_api_keys(request: Request):
     """
@@ -19,12 +42,7 @@ async def get_my_api_keys(request: Request):
     세션/토큰에서 user_id를 추출합니다. 세션이 없으면 401.
     """
     try:
-        current_user = get_current_user_from_request(request)
-        if not current_user:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        user_id = current_user.get("id") or current_user.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Authentication required")
+        user_id = _resolve_user_id_from_request(request)
 
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -72,12 +90,7 @@ async def get_suspicious_ips(
     """
     try:
         # 세션에서 사용자 정보 추출 (세션만 허용)
-        current_user = get_current_user_from_request(request)
-        if not current_user:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        user_id = current_user.get("id") or current_user.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Authentication required")
+        user_id = _resolve_user_id_from_request(request)
         
         offset = (page - 1) * limit
         
@@ -195,12 +208,7 @@ async def get_ip_stats(request: Request, key_id: Optional[str] = Query(None, des
     """
     try:
         # 세션에서 사용자 정보 추출 (세션만 허용)
-        current_user = get_current_user_from_request(request)
-        if not current_user:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        user_id = current_user.get("id") or current_user.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Authentication required")
+        user_id = _resolve_user_id_from_request(request)
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
