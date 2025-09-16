@@ -16,19 +16,15 @@ router = APIRouter(prefix="/api/admin", tags=["Suspicious IP Management"])
 async def get_my_api_keys(request: Request):
     """
     현재 사용자(user_id)의 활성 API 키 목록을 반환합니다.
-    - 헤더의 X-API-Key로 user_id를 조회한 뒤 해당 user_id의 키 목록을 반환
+    세션/토큰에서 user_id를 추출합니다. 세션이 없으면 401.
     """
     try:
-        api_key = request.headers.get("X-API-Key")
-        if not api_key:
-            raise HTTPException(status_code=401, detail="API key required")
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
-                row = cursor.fetchone()
-                if not row:
-                    raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = row["user_id"] if isinstance(row, dict) else row[0]
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        user_id = current_user.get("id") or current_user.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
 
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -75,19 +71,13 @@ async def get_suspicious_ips(
     각 API 키별로 자신의 데이터만 볼 수 있습니다.
     """
     try:
-        # API 키에서 사용자 정보 추출
-        api_key = request.headers.get("X-API-Key")
-        if not api_key:
-            raise HTTPException(status_code=401, detail="API key required")
-        
-        # API 키로 사용자 정보 조회
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
-                result = cursor.fetchone()
-                if not result:
-                    raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = result["user_id"] if isinstance(result, dict) else result[0]
+        # 세션에서 사용자 정보 추출 (세션만 허용)
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        user_id = current_user.get("id") or current_user.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
         
         offset = (page - 1) * limit
         
@@ -204,19 +194,13 @@ async def get_ip_stats(request: Request, key_id: Optional[str] = Query(None, des
     사용자의 IP 위반 통계를 조회합니다.
     """
     try:
-        # API 키에서 사용자 정보 추출
-        api_key = request.headers.get("X-API-Key")
-        if not api_key:
-            raise HTTPException(status_code=401, detail="API key required")
-        
-        # API 키로 사용자 정보 조회
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
-                result = cursor.fetchone()
-                if not result:
-                    raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = result["user_id"] if isinstance(result, dict) else result[0]
+        # 세션에서 사용자 정보 추출 (세션만 허용)
+        current_user = await get_current_user_from_request(request)
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        user_id = current_user.get("id") or current_user.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
