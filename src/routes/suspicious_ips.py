@@ -69,25 +69,23 @@ async def get_suspicious_ips(
                     params.append(is_blocked)
                 
                 where_clause = " AND ".join(where_conditions)
+                logger.info(f"[suspicious-ips] where={where_clause} keys={len(api_keys)} blocked_filter={is_blocked}")
                 
                 # 총 개수 조회
-                cursor.execute(f"""
-                    SELECT COUNT(*) FROM suspicious_ips 
-                    WHERE {where_clause}
-                """, params)
+                sql_count = f"SELECT COUNT(*) FROM suspicious_ips WHERE {where_clause}"
+                logger.info(f"[suspicious-ips] sql_count={sql_count} params={params}")
+                cursor.execute(sql_count, params)
                 total_count = cursor.fetchone()[0]
                 
                 # 데이터 조회
-                cursor.execute(f"""
-                    SELECT 
-                        id, api_key, ip_address, violation_count,
-                        first_violation_time, last_violation_time,
-                        is_blocked, block_reason, created_at, updated_at
-                    FROM suspicious_ips 
-                    WHERE {where_clause}
-                    ORDER BY last_violation_time DESC
-                    LIMIT %s OFFSET %s
-                """, params + [limit, offset])
+                sql_list = (
+                    f"SELECT id, api_key, ip_address, violation_count, first_violation_time, last_violation_time, "
+                    f"is_blocked, block_reason, created_at, updated_at FROM suspicious_ips WHERE {where_clause} "
+                    f"ORDER BY last_violation_time DESC LIMIT %s OFFSET %s"
+                )
+                list_params = params + [limit, offset]
+                logger.info(f"[suspicious-ips] sql_list={sql_list} params={list_params}")
+                cursor.execute(sql_list, list_params)
                 
                 suspicious_ips = []
                 for row in cursor.fetchall():
@@ -115,7 +113,7 @@ async def get_suspicious_ips(
                 }
                 
     except Exception as e:
-        logger.error(f"Failed to get suspicious IPs: {e}")
+        logger.exception(f"Failed to get suspicious IPs: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/ip-stats")
@@ -159,7 +157,7 @@ async def get_ip_stats(request: Request):
                     }
                 
                 # 전체 통계 조회
-                cursor.execute("""
+                sql_total = """
                     SELECT 
                         COUNT(*) as total_suspicious_ips,
                         SUM(CASE WHEN is_blocked = 1 THEN 1 ELSE 0 END) as blocked_ips,
@@ -167,12 +165,14 @@ async def get_ip_stats(request: Request):
                         SUM(CASE WHEN last_violation_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as recent_violations_24h
                     FROM suspicious_ips 
                     WHERE suspicious_ips.api_key IN (%s)
-                """ % ",".join(["%s"] * len(api_keys)), api_keys)
+                """ % ",".join(["%s"] * len(api_keys))
+                logger.info(f"[ip-stats] sql_total={sql_total} keys={len(api_keys)}")
+                cursor.execute(sql_total, api_keys)
                 
                 stats = cursor.fetchone()
                 
                 # API 키별 통계 조회
-                cursor.execute("""
+                sql_by_key = """
                     SELECT 
                         api_key,
                         COUNT(*) as total_suspicious_ips,
@@ -183,7 +183,9 @@ async def get_ip_stats(request: Request):
                     WHERE suspicious_ips.api_key IN (%s)
                     GROUP BY api_key
                     ORDER BY total_suspicious_ips DESC
-                """ % ",".join(["%s"] * len(api_keys)), api_keys)
+                """ % ",".join(["%s"] * len(api_keys))
+                logger.info(f"[ip-stats] sql_by_key={sql_by_key}")
+                cursor.execute(sql_by_key, api_keys)
                 
                 api_key_stats = []
                 for row in cursor.fetchall():
@@ -204,7 +206,7 @@ async def get_ip_stats(request: Request):
                 }
                 
     except Exception as e:
-        logger.error(f"Failed to get IP stats: {e}")
+        logger.exception(f"Failed to get IP stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/block-ip")
