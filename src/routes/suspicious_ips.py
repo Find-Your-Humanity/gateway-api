@@ -32,7 +32,7 @@ async def get_suspicious_ips(
         # API 키로 사용자 정보 조회
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE api_key = %s", (api_key,))
+                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
                 result = cursor.fetchone()
                 if not result:
                     raise HTTPException(status_code=401, detail="Invalid API key")
@@ -44,12 +44,12 @@ async def get_suspicious_ips(
             with conn.cursor() as cursor:
                 # 사용자의 API 키 목록 조회
                 cursor.execute("""
-                    SELECT api_key FROM api_keys 
+                    SELECT key_id FROM api_keys 
                     WHERE user_id = %s AND is_active = 1
                 """, (user_id,))
                 
                 rows = cursor.fetchall()
-                api_keys = [row["api_key"] if isinstance(row, dict) else row[0] for row in rows]
+                api_keys = [row["key_id"] if isinstance(row, dict) else row[0] for row in rows]
                 
                 if not api_keys:
                     return {
@@ -132,7 +132,7 @@ async def get_ip_stats(request: Request):
         # API 키로 사용자 정보 조회
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE api_key = %s", (api_key,))
+                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
                 result = cursor.fetchone()
                 if not result:
                     raise HTTPException(status_code=401, detail="Invalid API key")
@@ -142,12 +142,12 @@ async def get_ip_stats(request: Request):
             with conn.cursor() as cursor:
                 # 사용자의 API 키 목록 조회
                 cursor.execute("""
-                    SELECT api_key FROM api_keys 
+                    SELECT key_id FROM api_keys 
                     WHERE user_id = %s AND is_active = 1
                 """, (user_id,))
                 
                 rows = cursor.fetchall()
-                api_keys = [row["api_key"] if isinstance(row, dict) else row[0] for row in rows]
+                api_keys = [row["key_id"] if isinstance(row, dict) else row[0] for row in rows]
                 
                 if not api_keys:
                     return {
@@ -225,7 +225,7 @@ async def block_ip(
         # API 키로 사용자 정보 조회
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE api_key = %s", (api_key,))
+                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
                 result = cursor.fetchone()
                 if not result:
                     raise HTTPException(status_code=401, detail="Invalid API key")
@@ -235,12 +235,12 @@ async def block_ip(
             with conn.cursor() as cursor:
                 # 사용자의 API 키 목록 조회
                 cursor.execute("""
-                    SELECT api_key FROM api_keys 
+                    SELECT key_id FROM api_keys 
                     WHERE user_id = %s AND is_active = 1
                 """, (user_id,))
                 
                 rows = cursor.fetchall()
-                api_keys = [row["api_key"] if isinstance(row, dict) else row[0] for row in rows]
+                api_keys = [row["key_id"] if isinstance(row, dict) else row[0] for row in rows]
                 
                 if not api_keys:
                     raise HTTPException(status_code=404, detail="No API keys found")
