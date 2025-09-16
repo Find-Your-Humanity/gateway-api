@@ -6,7 +6,7 @@ Suspicious IP 관리 API 엔드포인트
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Dict, Any, Optional
 from src.config.database import get_db_connection
-from src.middleware.auth import get_current_user_from_request
+from src.routes.auth import get_current_user_from_request
 import logging
 
 logger = logging.getLogger(__name__)
