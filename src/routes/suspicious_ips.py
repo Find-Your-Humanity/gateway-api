@@ -3,7 +3,7 @@ Suspicious IP 관리 API 엔드포인트
 사용자별로 자신의 suspicious IP만 조회/관리할 수 있도록 구현
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from typing import List, Dict, Any, Optional
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/admin", tags=["Suspicious IP Management"])
 
 @router.get("/suspicious-ips")
 async def get_suspicious_ips(
-    current_user: Dict = Depends(get_current_user_from_request),
+    request: Request,
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 항목 수"),
     is_blocked: Optional[bool] = Query(None, description="차단 여부 필터")
@@ -24,7 +24,20 @@ async def get_suspicious_ips(
     각 API 키별로 자신의 데이터만 볼 수 있습니다.
     """
     try:
-        user_id = current_user["id"]
+        # API 키에서 사용자 정보 추출
+        api_key = request.headers.get("X-API-Key")
+        if not api_key:
+            raise HTTPException(status_code=401, detail="API key required")
+        
+        # API 키로 사용자 정보 조회
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT user_id FROM api_keys WHERE api_key = %s", (api_key,))
+                result = cursor.fetchone()
+                if not result:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
+                user_id = result[0]
+        
         offset = (page - 1) * limit
         
         with get_db_connection() as conn:
@@ -105,12 +118,24 @@ async def get_suspicious_ips(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/ip-stats")
-async def get_ip_stats(current_user: Dict = Depends(get_current_user_from_request)):
+async def get_ip_stats(request: Request):
     """
     사용자의 IP 위반 통계를 조회합니다.
     """
     try:
-        user_id = current_user["id"]
+        # API 키에서 사용자 정보 추출
+        api_key = request.headers.get("X-API-Key")
+        if not api_key:
+            raise HTTPException(status_code=401, detail="API key required")
+        
+        # API 키로 사용자 정보 조회
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT user_id FROM api_keys WHERE api_key = %s", (api_key,))
+                result = cursor.fetchone()
+                if not result:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
+                user_id = result[0]
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -182,15 +207,27 @@ async def get_ip_stats(current_user: Dict = Depends(get_current_user_from_reques
 
 @router.post("/block-ip")
 async def block_ip(
+    request: Request,
     ip_address: str,
-    reason: str = "Manual block",
-    current_user: Dict = Depends(get_current_user_from_request)
+    reason: str = "Manual block"
 ):
     """
     특정 IP를 차단합니다.
     """
     try:
-        user_id = current_user["id"]
+        # API 키에서 사용자 정보 추출
+        api_key = request.headers.get("X-API-Key")
+        if not api_key:
+            raise HTTPException(status_code=401, detail="API key required")
+        
+        # API 키로 사용자 정보 조회
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT user_id FROM api_keys WHERE api_key = %s", (api_key,))
+                result = cursor.fetchone()
+                if not result:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
+                user_id = result[0]
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -233,14 +270,26 @@ async def block_ip(
 
 @router.post("/unblock-ip")
 async def unblock_ip(
-    ip_address: str,
-    current_user: Dict = Depends(get_current_user_from_request)
+    request: Request,
+    ip_address: str
 ):
     """
     특정 IP의 차단을 해제합니다.
     """
     try:
-        user_id = current_user["id"]
+        # API 키에서 사용자 정보 추출
+        api_key = request.headers.get("X-API-Key")
+        if not api_key:
+            raise HTTPException(status_code=401, detail="API key required")
+        
+        # API 키로 사용자 정보 조회
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT user_id FROM api_keys WHERE api_key = %s", (api_key,))
+                result = cursor.fetchone()
+                if not result:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
+                user_id = result[0]
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
