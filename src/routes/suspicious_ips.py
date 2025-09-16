@@ -12,12 +12,73 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Suspicious IP Management"])
 
+@router.get("/my-api-keys")
+async def get_my_api_keys(request: Request):
+    """
+    현재 사용자(user_id)의 활성 API 키 목록을 반환합니다.
+    - 세션/토큰이 있으면 우선 사용
+    - 없을 경우 X-API-Key로 user_id 추출
+    """
+    try:
+        user_id: Optional[int] = None
+        try:
+            current_user = await get_current_user_from_request(request)
+            if current_user and isinstance(current_user, dict):
+                user_id = current_user.get("id") or current_user.get("user_id")
+        except Exception:
+            user_id = None
+
+        if user_id is None:
+            api_key = request.headers.get("X-API-Key")
+            if not api_key:
+                raise HTTPException(status_code=401, detail="Authentication required")
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
+                    row = cursor.fetchone()
+                    if not row:
+                        raise HTTPException(status_code=401, detail="Invalid API key")
+                    user_id = row["user_id"] if isinstance(row, dict) else row[0]
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT key_id, created_at, is_active
+                    FROM api_keys
+                    WHERE user_id = %s AND is_active = 1
+                    ORDER BY created_at DESC
+                    """,
+                    (user_id,),
+                )
+                keys = []
+                for row in cursor.fetchall():
+                    if isinstance(row, dict):
+                        keys.append({
+                            "key_id": row.get("key_id"),
+                            "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+                            "is_active": bool(row.get("is_active", 0)),
+                        })
+                    else:
+                        keys.append({
+                            "key_id": row[0],
+                            "created_at": row[1].isoformat() if row[1] else None,
+                            "is_active": bool(row[2]),
+                        })
+                return {"api_keys": keys}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to get my api keys: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 @router.get("/suspicious-ips")
 async def get_suspicious_ips(
     request: Request,
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 항목 수"),
-    is_blocked: Optional[bool] = Query(None, description="차단 여부 필터")
+    is_blocked: Optional[bool] = Query(None, description="차단 여부 필터"),
+    key_id: Optional[str] = Query(None, description="특정 API 키로 필터")
 ):
     """
     사용자의 suspicious IP 목록을 조회합니다.
@@ -63,6 +124,13 @@ async def get_suspicious_ips(
                 # WHERE 조건 구성 (user_id로 강제 필터)
                 where_conditions = ["api_keys.user_id = %s"]
                 params = [user_id]
+
+                # key_id가 지정되면 소유 검증 후 해당 키로 제한
+                if key_id:
+                    if key_id not in api_keys:
+                        raise HTTPException(status_code=403, detail="Forbidden: key not owned")
+                    where_conditions.append("api_keys.key_id = %s")
+                    params.append(key_id)
                 
                 if is_blocked is not None:
                     where_conditions.append("suspicious_ips.is_blocked = %s")
@@ -141,7 +209,7 @@ async def get_suspicious_ips(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/ip-stats")
-async def get_ip_stats(request: Request):
+async def get_ip_stats(request: Request, key_id: Optional[str] = Query(None, description="특정 API 키로 필터")):
     """
     사용자의 IP 위반 통계를 조회합니다.
     """
@@ -179,6 +247,12 @@ async def get_ip_stats(request: Request):
                         "recent_violations_24h": 0,
                         "api_key_stats": []
                     }
+                # key_id가 지정되면 소유 검증
+                filter_key: Optional[str] = None
+                if key_id:
+                    if key_id not in api_keys:
+                        raise HTTPException(status_code=403, detail="Forbidden: key not owned")
+                    filter_key = key_id
                 
                 # 전체 통계 조회
                 sql_total = """
@@ -190,9 +264,13 @@ async def get_ip_stats(request: Request):
                     FROM suspicious_ips 
                     JOIN api_keys ON suspicious_ips.api_key = api_keys.key_id
                     WHERE api_keys.user_id = %s
+                    {extra}
                 """
-                logger.info(f"[ip-stats] sql_total={sql_total} user_id={user_id}")
-                cursor.execute(sql_total, (user_id,))
+                extra = " AND api_keys.key_id = %s" if filter_key else ""
+                q_total = sql_total.format(extra=extra)
+                logger.info(f"[ip-stats] sql_total={q_total} user_id={user_id} key={filter_key}")
+                params_total = (user_id, filter_key) if filter_key else (user_id,)
+                cursor.execute(q_total, params_total)
                 
                 stats = cursor.fetchone() or {}
                 
@@ -207,11 +285,14 @@ async def get_ip_stats(request: Request):
                     FROM suspicious_ips 
                     JOIN api_keys ON suspicious_ips.api_key = api_keys.key_id
                     WHERE api_keys.user_id = %s
+                    {extra}
                     GROUP BY suspicious_ips.api_key
                     ORDER BY total_suspicious_ips DESC
                 """
-                logger.info(f"[ip-stats] sql_by_key={sql_by_key} user_id={user_id}")
-                cursor.execute(sql_by_key, (user_id,))
+                q_by_key = sql_by_key.format(extra=(" AND api_keys.key_id = %s" if filter_key else ""))
+                logger.info(f"[ip-stats] sql_by_key={q_by_key} user_id={user_id} key={filter_key}")
+                params_by_key = (user_id, filter_key) if filter_key else (user_id,)
+                cursor.execute(q_by_key, params_by_key)
                 
                 api_key_stats = []
                 for row in cursor.fetchall():
