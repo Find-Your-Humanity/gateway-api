@@ -19,7 +19,7 @@ async def get_my_api_keys(request: Request):
     세션/토큰에서 user_id를 추출합니다. 세션이 없으면 401.
     """
     try:
-        current_user = await get_current_user_from_request(request)
+        current_user = get_current_user_from_request(request)
         if not current_user:
             raise HTTPException(status_code=401, detail="Authentication required")
         user_id = current_user.get("id") or current_user.get("user_id")
@@ -72,7 +72,7 @@ async def get_suspicious_ips(
     """
     try:
         # 세션에서 사용자 정보 추출 (세션만 허용)
-        current_user = await get_current_user_from_request(request)
+        current_user = get_current_user_from_request(request)
         if not current_user:
             raise HTTPException(status_code=401, detail="Authentication required")
         user_id = current_user.get("id") or current_user.get("user_id")
@@ -195,7 +195,7 @@ async def get_ip_stats(request: Request, key_id: Optional[str] = Query(None, des
     """
     try:
         # 세션에서 사용자 정보 추출 (세션만 허용)
-        current_user = await get_current_user_from_request(request)
+        current_user = get_current_user_from_request(request)
         if not current_user:
             raise HTTPException(status_code=401, detail="Authentication required")
         user_id = current_user.get("id") or current_user.get("user_id")
