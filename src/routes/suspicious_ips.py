@@ -72,10 +72,11 @@ async def get_suspicious_ips(
                 logger.info(f"[suspicious-ips] where={where_clause} keys={len(api_keys)} blocked_filter={is_blocked}")
                 
                 # 총 개수 조회
-                sql_count = f"SELECT COUNT(*) FROM suspicious_ips WHERE {where_clause}"
+                sql_count = f"SELECT COUNT(*) AS cnt FROM suspicious_ips WHERE {where_clause}"
                 logger.info(f"[suspicious-ips] sql_count={sql_count} params={params}")
                 cursor.execute(sql_count, params)
-                total_count = cursor.fetchone()[0]
+                _row = cursor.fetchone()
+                total_count = (_row.get("cnt") if isinstance(_row, dict) else _row[0]) if _row else 0
                 
                 # 데이터 조회
                 sql_list = (
@@ -89,18 +90,32 @@ async def get_suspicious_ips(
                 
                 suspicious_ips = []
                 for row in cursor.fetchall():
-                    suspicious_ips.append({
-                        "id": row[0],
-                        "api_key": row[1],
-                        "ip_address": row[2],
-                        "violation_count": row[3],
-                        "first_violation_time": row[4].isoformat() if row[4] else None,
-                        "last_violation_time": row[5].isoformat() if row[5] else None,
-                        "is_blocked": bool(row[6]),
-                        "block_reason": row[7],
-                        "created_at": row[8].isoformat() if row[8] else None,
-                        "updated_at": row[9].isoformat() if row[9] else None
-                    })
+                    if isinstance(row, dict):
+                        suspicious_ips.append({
+                            "id": row.get("id"),
+                            "api_key": row.get("api_key"),
+                            "ip_address": row.get("ip_address"),
+                            "violation_count": row.get("violation_count"),
+                            "first_violation_time": row.get("first_violation_time").isoformat() if row.get("first_violation_time") else None,
+                            "last_violation_time": row.get("last_violation_time").isoformat() if row.get("last_violation_time") else None,
+                            "is_blocked": bool(row.get("is_blocked")),
+                            "block_reason": row.get("block_reason"),
+                            "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+                            "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") else None,
+                        })
+                    else:
+                        suspicious_ips.append({
+                            "id": row[0],
+                            "api_key": row[1],
+                            "ip_address": row[2],
+                            "violation_count": row[3],
+                            "first_violation_time": row[4].isoformat() if row[4] else None,
+                            "last_violation_time": row[5].isoformat() if row[5] else None,
+                            "is_blocked": bool(row[6]),
+                            "block_reason": row[7],
+                            "created_at": row[8].isoformat() if row[8] else None,
+                            "updated_at": row[9].isoformat() if row[9] else None,
+                        })
                 
                 total_pages = (total_count + limit - 1) // limit
                 
@@ -169,7 +184,7 @@ async def get_ip_stats(request: Request):
                 logger.info(f"[ip-stats] sql_total={sql_total} keys={len(api_keys)}")
                 cursor.execute(sql_total, api_keys)
                 
-                stats = cursor.fetchone()
+                stats = cursor.fetchone() or {}
                 
                 # API 키별 통계 조회
                 sql_by_key = """
@@ -189,20 +204,40 @@ async def get_ip_stats(request: Request):
                 
                 api_key_stats = []
                 for row in cursor.fetchall():
-                    api_key_stats.append({
-                        "api_key": row[0],
-                        "total_suspicious_ips": row[1],
-                        "blocked_ips": row[2],
-                        "active_suspicious_ips": row[3],
-                        "recent_violations_24h": row[4]
-                    })
+                    if isinstance(row, dict):
+                        api_key_stats.append({
+                            "api_key": row.get("api_key"),
+                            "total_suspicious_ips": row.get("total_suspicious_ips", 0),
+                            "blocked_ips": row.get("blocked_ips", 0),
+                            "active_suspicious_ips": row.get("active_suspicious_ips", 0),
+                            "recent_violations_24h": row.get("recent_violations_24h", 0),
+                        })
+                    else:
+                        api_key_stats.append({
+                            "api_key": row[0],
+                            "total_suspicious_ips": row[1],
+                            "blocked_ips": row[2],
+                            "active_suspicious_ips": row[3],
+                            "recent_violations_24h": row[4],
+                        })
                 
+                if isinstance(stats, dict):
+                    total = stats.get("total_suspicious_ips", 0) or 0
+                    blocked = stats.get("blocked_ips", 0) or 0
+                    active = stats.get("active_suspicious_ips", 0) or 0
+                    recent = stats.get("recent_violations_24h", 0) or 0
+                else:
+                    total = (stats[0] if len(stats) > 0 else 0) or 0
+                    blocked = (stats[1] if len(stats) > 1 else 0) or 0
+                    active = (stats[2] if len(stats) > 2 else 0) or 0
+                    recent = (stats[3] if len(stats) > 3 else 0) or 0
+
                 return {
-                    "total_suspicious_ips": stats[0] or 0,
-                    "blocked_ips": stats[1] or 0,
-                    "active_suspicious_ips": stats[2] or 0,
-                    "recent_violations_24h": stats[3] or 0,
-                    "api_key_stats": api_key_stats
+                    "total_suspicious_ips": total,
+                    "blocked_ips": blocked,
+                    "active_suspicious_ips": active,
+                    "recent_violations_24h": recent,
+                    "api_key_stats": api_key_stats,
                 }
                 
     except Exception as e:
