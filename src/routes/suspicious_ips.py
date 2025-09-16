@@ -36,7 +36,7 @@ async def get_suspicious_ips(
                 result = cursor.fetchone()
                 if not result:
                     raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = result[0]
+                user_id = result["user_id"] if isinstance(result, dict) else result[0]
         
         offset = (page - 1) * limit
         
@@ -44,11 +44,12 @@ async def get_suspicious_ips(
             with conn.cursor() as cursor:
                 # 사용자의 API 키 목록 조회
                 cursor.execute("""
-                    SELECT key_id FROM api_keys 
+                    SELECT api_key FROM api_keys 
                     WHERE user_id = %s AND is_active = 1
                 """, (user_id,))
                 
-                api_keys = [row[0] for row in cursor.fetchall()]
+                rows = cursor.fetchall()
+                api_keys = [row["api_key"] if isinstance(row, dict) else row[0] for row in rows]
                 
                 if not api_keys:
                     return {
@@ -135,17 +136,18 @@ async def get_ip_stats(request: Request):
                 result = cursor.fetchone()
                 if not result:
                     raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = result[0]
+                user_id = result["user_id"] if isinstance(result, dict) else result[0]
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 # 사용자의 API 키 목록 조회
                 cursor.execute("""
-                    SELECT key_id FROM api_keys 
+                    SELECT api_key FROM api_keys 
                     WHERE user_id = %s AND is_active = 1
                 """, (user_id,))
                 
-                api_keys = [row[0] for row in cursor.fetchall()]
+                rows = cursor.fetchall()
+                api_keys = [row["api_key"] if isinstance(row, dict) else row[0] for row in rows]
                 
                 if not api_keys:
                     return {
@@ -227,17 +229,18 @@ async def block_ip(
                 result = cursor.fetchone()
                 if not result:
                     raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = result[0]
+                user_id = result["user_id"] if isinstance(result, dict) else result[0]
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 # 사용자의 API 키 목록 조회
                 cursor.execute("""
-                    SELECT key_id FROM api_keys 
+                    SELECT api_key FROM api_keys 
                     WHERE user_id = %s AND is_active = 1
                 """, (user_id,))
                 
-                api_keys = [row[0] for row in cursor.fetchall()]
+                rows = cursor.fetchall()
+                api_keys = [row["api_key"] if isinstance(row, dict) else row[0] for row in rows]
                 
                 if not api_keys:
                     raise HTTPException(status_code=404, detail="No API keys found")
@@ -289,17 +292,18 @@ async def unblock_ip(
                 result = cursor.fetchone()
                 if not result:
                     raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = result[0]
+                user_id = result["user_id"] if isinstance(result, dict) else result[0]
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 # 사용자의 API 키 목록 조회
                 cursor.execute("""
-                    SELECT key_id FROM api_keys 
+                    SELECT api_key FROM api_keys 
                     WHERE user_id = %s AND is_active = 1
                 """, (user_id,))
                 
-                api_keys = [row[0] for row in cursor.fetchall()]
+                rows = cursor.fetchall()
+                api_keys = [row["api_key"] if isinstance(row, dict) else row[0] for row in rows]
                 
                 if not api_keys:
                     raise HTTPException(status_code=404, detail="No API keys found")
