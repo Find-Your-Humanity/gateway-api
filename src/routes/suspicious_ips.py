@@ -61,7 +61,7 @@ async def get_suspicious_ips(
                     }
                 
                 # WHERE 조건 구성
-                where_conditions = ["api_key IN (%s)" % ",".join(["%s"] * len(api_keys))]
+                where_conditions = ["suspicious_ips.api_key IN (%s)" % ",".join(["%s"] * len(api_keys))]
                 params = api_keys.copy()
                 
                 if is_blocked is not None:
@@ -166,7 +166,7 @@ async def get_ip_stats(request: Request):
                         SUM(CASE WHEN is_blocked = 0 THEN 1 ELSE 0 END) as active_suspicious_ips,
                         SUM(CASE WHEN last_violation_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as recent_violations_24h
                     FROM suspicious_ips 
-                    WHERE api_key IN (%s)
+                    WHERE suspicious_ips.api_key IN (%s)
                 """ % ",".join(["%s"] * len(api_keys)), api_keys)
                 
                 stats = cursor.fetchone()
@@ -180,7 +180,7 @@ async def get_ip_stats(request: Request):
                         SUM(CASE WHEN is_blocked = 0 THEN 1 ELSE 0 END) as active_suspicious_ips,
                         SUM(CASE WHEN last_violation_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as recent_violations_24h
                     FROM suspicious_ips 
-                    WHERE api_key IN (%s)
+                    WHERE suspicious_ips.api_key IN (%s)
                     GROUP BY api_key
                     ORDER BY total_suspicious_ips DESC
                 """ % ",".join(["%s"] * len(api_keys)), api_keys)
