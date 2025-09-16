@@ -200,3 +200,4 @@ SELECT
     SUM(CASE WHEN plan_type = 'paid' THEN 1 ELSE 0 END) as paid_plans,
     SUM(CASE WHEN is_active = TRUE THEN 1 ELSE 0 END) as active_plans
 FROM plans;
+

@@ -16,17 +16,19 @@ router = APIRouter(prefix="/api/admin", tags=["Suspicious IP Management"])
 async def get_my_api_keys(request: Request):
     """
     현재 사용자(user_id)의 활성 API 키 목록을 반환합니다.
-    - 세션/토큰이 있으면 우선 사용
-    - 없을 경우 X-API-Key로 user_id 추출
+    - 헤더의 X-API-Key로 user_id를 조회한 뒤 해당 user_id의 키 목록을 반환
     """
     try:
-        # 세션/Authorization 기반 인증만 허용 (API 키로 사용자 식별 금지)
-        current_user = await get_current_user_from_request(request)
-        if not current_user:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        user_id = current_user.get("id") or current_user.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Authentication required")
+        api_key = request.headers.get("X-API-Key")
+        if not api_key:
+            raise HTTPException(status_code=401, detail="API key required")
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
+                row = cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=401, detail="Invalid API key")
+                user_id = row["user_id"] if isinstance(row, dict) else row[0]
 
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
