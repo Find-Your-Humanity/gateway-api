@@ -68,6 +68,7 @@ from src.routes.captcha import router as captcha_router
 from src.routes.admin_documents import router as admin_documents_router
 from src.routes.payment_router import router as payment_router
 from src.routes.user_stats import router as user_stats_router
+from src.routes.suspicious_ips import router as suspicious_ips_router
 from src.middleware.request_logging import RequestLoggingMiddleware
 from src.middleware.usage_tracking import UsageTrackingMiddleware
 from src.services.usage_service import usage_service
@@ -96,6 +97,7 @@ app.include_router(captcha_router)
 app.include_router(admin_documents_router)
 app.include_router(payment_router)
 app.include_router(user_stats_router)
+app.include_router(suspicious_ips_router)
 
 # 미들웨어 등록 (순서 중요: CORS -> 로깅)
 app.add_middleware(
