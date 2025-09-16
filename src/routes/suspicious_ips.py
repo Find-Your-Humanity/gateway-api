@@ -60,19 +60,24 @@ async def get_suspicious_ips(
                         "total_pages": 0
                     }
                 
-                # WHERE 조건 구성
-                where_conditions = ["suspicious_ips.api_key IN (%s)" % ",".join(["%s"] * len(api_keys))]
-                params = api_keys.copy()
+                # WHERE 조건 구성 (user_id로 강제 필터)
+                where_conditions = ["api_keys.user_id = %s"]
+                params = [user_id]
                 
                 if is_blocked is not None:
-                    where_conditions.append("is_blocked = %s")
+                    where_conditions.append("suspicious_ips.is_blocked = %s")
                     params.append(is_blocked)
                 
                 where_clause = " AND ".join(where_conditions)
                 logger.info(f"[suspicious-ips] where={where_clause} keys={len(api_keys)} blocked_filter={is_blocked}")
                 
                 # 총 개수 조회
-                sql_count = f"SELECT COUNT(*) AS cnt FROM suspicious_ips WHERE {where_clause}"
+                sql_count = (
+                    "SELECT COUNT(*) AS cnt "
+                    "FROM suspicious_ips "
+                    "JOIN api_keys ON suspicious_ips.api_key = api_keys.key_id "
+                    f"WHERE {where_clause}"
+                )
                 logger.info(f"[suspicious-ips] sql_count={sql_count} params={params}")
                 cursor.execute(sql_count, params)
                 _row = cursor.fetchone()
@@ -80,11 +85,15 @@ async def get_suspicious_ips(
                 
                 # 데이터 조회
                 sql_list = (
-                    f"SELECT id, api_key, ip_address, violation_count, first_violation_time, last_violation_time, "
-                    f"is_blocked, block_reason, created_at, updated_at FROM suspicious_ips WHERE {where_clause} "
-                    f"ORDER BY last_violation_time DESC LIMIT %s OFFSET %s"
+                    "SELECT suspicious_ips.id, suspicious_ips.api_key, suspicious_ips.ip_address, suspicious_ips.violation_count, "
+                    "suspicious_ips.first_violation_time, suspicious_ips.last_violation_time, "
+                    "suspicious_ips.is_blocked, suspicious_ips.block_reason, suspicious_ips.created_at, suspicious_ips.updated_at "
+                    "FROM suspicious_ips "
+                    "JOIN api_keys ON suspicious_ips.api_key = api_keys.key_id "
+                    f"WHERE {where_clause} "
+                    "ORDER BY suspicious_ips.last_violation_time DESC LIMIT %s OFFSET %s"
                 )
-                list_params = params + [limit, offset]
+                list_params = [*params, limit, offset]
                 logger.info(f"[suspicious-ips] sql_list={sql_list} params={list_params}")
                 cursor.execute(sql_list, list_params)
                 
@@ -175,32 +184,34 @@ async def get_ip_stats(request: Request):
                 sql_total = """
                     SELECT 
                         COUNT(*) as total_suspicious_ips,
-                        SUM(CASE WHEN is_blocked = 1 THEN 1 ELSE 0 END) as blocked_ips,
-                        SUM(CASE WHEN is_blocked = 0 THEN 1 ELSE 0 END) as active_suspicious_ips,
-                        SUM(CASE WHEN last_violation_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as recent_violations_24h
+                        SUM(CASE WHEN suspicious_ips.is_blocked = 1 THEN 1 ELSE 0 END) as blocked_ips,
+                        SUM(CASE WHEN suspicious_ips.is_blocked = 0 THEN 1 ELSE 0 END) as active_suspicious_ips,
+                        SUM(CASE WHEN suspicious_ips.last_violation_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as recent_violations_24h
                     FROM suspicious_ips 
-                    WHERE suspicious_ips.api_key IN (%s)
-                """ % ",".join(["%s"] * len(api_keys))
-                logger.info(f"[ip-stats] sql_total={sql_total} keys={len(api_keys)}")
-                cursor.execute(sql_total, api_keys)
+                    JOIN api_keys ON suspicious_ips.api_key = api_keys.key_id
+                    WHERE api_keys.user_id = %s
+                """
+                logger.info(f"[ip-stats] sql_total={sql_total} user_id={user_id}")
+                cursor.execute(sql_total, (user_id,))
                 
                 stats = cursor.fetchone() or {}
                 
                 # API 키별 통계 조회
                 sql_by_key = """
                     SELECT 
-                        api_key,
+                        suspicious_ips.api_key,
                         COUNT(*) as total_suspicious_ips,
-                        SUM(CASE WHEN is_blocked = 1 THEN 1 ELSE 0 END) as blocked_ips,
-                        SUM(CASE WHEN is_blocked = 0 THEN 1 ELSE 0 END) as active_suspicious_ips,
-                        SUM(CASE WHEN last_violation_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as recent_violations_24h
+                        SUM(CASE WHEN suspicious_ips.is_blocked = 1 THEN 1 ELSE 0 END) as blocked_ips,
+                        SUM(CASE WHEN suspicious_ips.is_blocked = 0 THEN 1 ELSE 0 END) as active_suspicious_ips,
+                        SUM(CASE WHEN suspicious_ips.last_violation_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as recent_violations_24h
                     FROM suspicious_ips 
-                    WHERE suspicious_ips.api_key IN (%s)
-                    GROUP BY api_key
+                    JOIN api_keys ON suspicious_ips.api_key = api_keys.key_id
+                    WHERE api_keys.user_id = %s
+                    GROUP BY suspicious_ips.api_key
                     ORDER BY total_suspicious_ips DESC
-                """ % ",".join(["%s"] * len(api_keys))
-                logger.info(f"[ip-stats] sql_by_key={sql_by_key}")
-                cursor.execute(sql_by_key, api_keys)
+                """
+                logger.info(f"[ip-stats] sql_by_key={sql_by_key} user_id={user_id}")
+                cursor.execute(sql_by_key, (user_id,))
                 
                 api_key_stats = []
                 for row in cursor.fetchall():
@@ -282,13 +293,16 @@ async def block_ip(
                 if not api_keys:
                     raise HTTPException(status_code=404, detail="No API keys found")
                 
-                # IP 차단 업데이트
-                cursor.execute("""
+                # IP 차단 업데이트 (Placeholders 안전하게 구성)
+                placeholders = ",".join(["%s"] * len(api_keys))
+                sql = f"""
                     UPDATE suspicious_ips 
                     SET is_blocked = 1, block_reason = %s, updated_at = CURRENT_TIMESTAMP
-                    WHERE ip_address = %s AND api_key IN (%s)
-                """ % ("%s,%s," + ",".join(["%s"] * len(api_keys))), 
-                [reason, ip_address] + api_keys)
+                    WHERE ip_address = %s AND api_key IN ({placeholders})
+                """
+                params = [reason, ip_address, *api_keys]
+                logger.info(f"[block-ip] sql={sql} params(len)={len(params)}")
+                cursor.execute(sql, params)
                 
                 affected_rows = cursor.rowcount
                 
@@ -325,7 +339,7 @@ async def unblock_ip(
         # API 키로 사용자 정보 조회
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE api_key = %s", (api_key,))
+                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
                 result = cursor.fetchone()
                 if not result:
                     raise HTTPException(status_code=401, detail="Invalid API key")
@@ -335,23 +349,26 @@ async def unblock_ip(
             with conn.cursor() as cursor:
                 # 사용자의 API 키 목록 조회
                 cursor.execute("""
-                    SELECT api_key FROM api_keys 
+                    SELECT key_id FROM api_keys 
                     WHERE user_id = %s AND is_active = 1
                 """, (user_id,))
                 
                 rows = cursor.fetchall()
-                api_keys = [row["api_key"] if isinstance(row, dict) else row[0] for row in rows]
+                api_keys = [row["key_id"] if isinstance(row, dict) else row[0] for row in rows]
                 
                 if not api_keys:
                     raise HTTPException(status_code=404, detail="No API keys found")
                 
                 # IP 차단 해제
-                cursor.execute("""
+                placeholders = ",".join(["%s"] * len(api_keys))
+                sql = f"""
                     UPDATE suspicious_ips 
                     SET is_blocked = 0, block_reason = NULL, updated_at = CURRENT_TIMESTAMP
-                    WHERE ip_address = %s AND api_key IN (%s)
-                """ % ("%s," + ",".join(["%s"] * len(api_keys))), 
-                [ip_address] + api_keys)
+                    WHERE ip_address = %s AND api_key IN ({placeholders})
+                """
+                params = [ip_address, *api_keys]
+                logger.info(f"[unblock-ip] sql={sql} params(len)={len(params)}")
+                cursor.execute(sql, params)
                 
                 affected_rows = cursor.rowcount
                 
