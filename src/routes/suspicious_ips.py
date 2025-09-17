@@ -106,23 +106,31 @@ def _resolve_user_id_from_request(request: Request) -> int:
     """세션 우선, 없으면 X-API-Key로 user_id 유도. 실패 시 401."""
     try:
         current_user = get_current_user_from_request(request)
-        if isinstance(current_user, dict):
+        if current_user and isinstance(current_user, dict):
             user_id = current_user.get("id") or current_user.get("user_id")
             if user_id:
+                logger.info(f"세션에서 사용자 ID 추출 성공: {user_id}")
                 return int(user_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"세션 인증 실패: {e}")
 
+    # 세션 인증 실패 시 API 키로 폴백
     api_key = request.headers.get("X-API-Key")
     if not api_key:
+        logger.error("세션과 API 키 모두 없음")
         raise HTTPException(status_code=401, detail="Authentication required")
+    
+    logger.info(f"API 키로 인증 시도: {api_key[:20]}...")
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
             row = cursor.fetchone()
             if not row:
+                logger.error("유효하지 않은 API 키")
                 raise HTTPException(status_code=401, detail="Invalid API key")
-            return int(row["user_id"] if isinstance(row, dict) else row[0])
+            user_id = int(row["user_id"] if isinstance(row, dict) else row[0])
+            logger.info(f"API 키로 사용자 ID 추출 성공: {user_id}")
+            return user_id
 
 @router.get("/my-api-keys")
 async def get_my_api_keys(request: Request):
