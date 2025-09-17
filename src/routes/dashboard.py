@@ -140,7 +140,6 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                 six_months_ago = today - timedelta(days=180)  # 대략 6개월
                 cursor.execute("""
                     SELECT 
-                        DATE_FORMAT(date, '%%Y-%%m') as month,
                         YEAR(date) as year,
                         MONTH(date) as month_num,
                         api_type,
@@ -165,7 +164,7 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                     month_num = current_date.month
                     
                     # 해당 월의 데이터 찾기
-                    month_data = [item for item in monthly_usage_by_type if item['month'] == month_str]
+                    month_data = [item for item in monthly_usage_by_type if item['year'] == year and item['month_num'] == month_num]
                     
                     # api_type별로 데이터 정리
                     month_stats = {
