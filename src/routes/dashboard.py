@@ -136,6 +136,61 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                     'level_3': (captcha_stats['abstract'] / total_captcha_usage * 100) if total_captcha_usage > 0 else 0,
                 }
                 
+                # 7. 최근 6개월 월별 사용량 조회 (api_type별)
+                six_months_ago = today - timedelta(days=180)  # 대략 6개월
+                cursor.execute("""
+                    SELECT 
+                        DATE_FORMAT(date, '%Y-%m') as month,
+                        YEAR(date) as year,
+                        MONTH(date) as month_num,
+                        api_type,
+                        SUM(total_requests) as total_requests,
+                        SUM(successful_requests) as successful_requests,
+                        SUM(failed_requests) as failed_requests
+                    FROM daily_user_api_stats
+                    WHERE user_id = %s AND date >= %s
+                    GROUP BY YEAR(date), MONTH(date), api_type
+                    ORDER BY year, month_num, api_type
+                """, (user_id, six_months_ago))
+                
+                monthly_usage_by_type = cursor.fetchall()
+                
+                # 월별 데이터 포맷팅 (빈 월도 포함)
+                monthly_usage_data = []
+                current_date = six_months_ago
+                
+                for i in range(6):  # 최근 6개월
+                    month_str = current_date.strftime('%Y-%m')
+                    year = current_date.year
+                    month_num = current_date.month
+                    
+                    # 해당 월의 데이터 찾기
+                    month_data = [item for item in monthly_usage_by_type if item['month'] == month_str]
+                    
+                    # api_type별로 데이터 정리
+                    month_stats = {
+                        'month': f"{year}년 {month_num}월",
+                        'month_short': f"{month_num}월",
+                        'handwriting': 0,
+                        'abstract': 0,
+                        'imagecaptcha': 0,
+                        'total': 0
+                    }
+                    
+                    for data in month_data:
+                        api_type = data['api_type']
+                        requests = data['total_requests'] or 0
+                        month_stats[api_type] = requests
+                        month_stats['total'] += requests
+                    
+                    monthly_usage_data.append(month_stats)
+                    
+                    # 다음 달로 이동
+                    if month_num == 12:
+                        current_date = current_date.replace(year=year + 1, month=1, day=1)
+                    else:
+                        current_date = current_date.replace(month=month_num + 1, day=1)
+                
                 return {
                     "success": True,
                     "data": {
@@ -153,88 +208,14 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                             "avg_response_time": round(sum(stat['avg_response_time'] or 0 for stat in monthly_stats_by_type) / len(monthly_stats_by_type), 2) if monthly_stats_by_type else 0
                         },
                         "captcha_stats": captcha_stats,
-                        "level_stats": level_stats
+                        "level_stats": level_stats,
+                        "monthly_usage": monthly_usage_data
                     }
                 }
                 
     except Exception as e:
         print(f"대시보드 분석 데이터 조회 오류: {e}")
         raise HTTPException(status_code=500, detail="대시보드 데이터 조회에 실패했습니다")
-
-
-@router.get("/dashboard/monthly-usage")
-def get_monthly_usage(request: Request, current_user = Depends(require_auth)):
-    """최근 6개월 월별 크레딧 사용량 데이터를 반환합니다."""
-    user_id = current_user['id']
-    
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                # 최근 6개월 데이터 조회
-                today = datetime.now().date()
-                six_months_ago = today - timedelta(days=180)  # 대략 6개월
-                
-                cursor.execute("""
-                    SELECT 
-                        DATE_FORMAT(date, '%Y-%m') as month,
-                        YEAR(date) as year,
-                        MONTH(date) as month_num,
-                        SUM(total_requests) as total_requests,
-                        SUM(successful_requests) as successful_requests,
-                        SUM(failed_requests) as failed_requests
-                    FROM daily_user_api_stats
-                    WHERE user_id = %s AND date >= %s
-                    GROUP BY YEAR(date), MONTH(date)
-                    ORDER BY year, month_num
-                """, (user_id, six_months_ago))
-                
-                monthly_data = cursor.fetchall()
-                
-                # 월별 데이터 포맷팅 (빈 월도 포함)
-                result_data = []
-                current_date = six_months_ago
-                
-                for i in range(6):  # 최근 6개월
-                    month_str = current_date.strftime('%Y-%m')
-                    year = current_date.year
-                    month_num = current_date.month
-                    
-                    # 해당 월의 데이터 찾기
-                    month_data = next((item for item in monthly_data if item['month'] == month_str), None)
-                    
-                    if month_data:
-                        result_data.append({
-                            'month': f"{year}년 {month_num}월",
-                            'month_short': f"{month_num}월",
-                            'total_requests': month_data['total_requests'] or 0,
-                            'successful_requests': month_data['successful_requests'] or 0,
-                            'failed_requests': month_data['failed_requests'] or 0
-                        })
-                    else:
-                        result_data.append({
-                            'month': f"{year}년 {month_num}월",
-                            'month_short': f"{month_num}월",
-                            'total_requests': 0,
-                            'successful_requests': 0,
-                            'failed_requests': 0
-                        })
-                    
-                    # 다음 달로 이동
-                    if month_num == 12:
-                        current_date = current_date.replace(year=year + 1, month=1, day=1)
-                    else:
-                        current_date = current_date.replace(month=month_num + 1, day=1)
-                
-                return {
-                    "success": True,
-                    "data": {
-                        "monthly_usage": result_data
-                    }
-                }
-                
-    except Exception as e:
-        print(f"월별 사용량 데이터 조회 오류: {e}")
-        raise HTTPException(status_code=500, detail="월별 사용량 데이터 조회에 실패했습니다")
 
 
 @router.get("/dashboard/stats")
