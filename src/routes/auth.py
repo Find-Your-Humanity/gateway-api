@@ -550,7 +550,12 @@ def get_current_user(request: Request, response: Response):
     try:
         user = get_current_user_from_request(request)
         if not user:
-            raise HTTPException(status_code=401, detail="인증이 필요합니다.")
+            # 401 대신 200 + 빈 응답으로 변경하여 네트워크 에러 방지
+            return {
+                "success": False,
+                "user": None,
+                "message": "인증이 필요합니다."
+            }
         
         # 백필: refresh 쿠키가 없으면 1회 자동 발급
         try:
@@ -576,8 +581,6 @@ def get_current_user(request: Request, response: Response):
             "success": True,
             "user": user
         }
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"사용자 정보 조회 실패: {e}")
 
