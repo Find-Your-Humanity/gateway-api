@@ -37,6 +37,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method
         user_agent = request.headers.get("user-agent", "")
+        
+        # 클라이언트 IP 추출 (프록시 헤더 우선)
+        client_ip = self._get_client_ip(request)
 
         # 제외할 경로 체크 - 로깅하지 않고 바로 응답
         if any(path.startswith(excluded_path) for excluded_path in self.EXCLUDED_PATHS):
@@ -132,3 +135,28 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             logger.error(f"요청 로그 저장 실패: {e}")
             # 로그 저장 실패가 전체 요청에 영향을 주지 않도록 함
+    
+    def _get_client_ip(self, request: Request) -> str:
+        """클라이언트 IP 주소를 추출합니다."""
+        # X-Forwarded-For 헤더 확인 (프록시/로드밸런서 환경)
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            # 첫 번째 IP가 실제 클라이언트 IP
+            client_ip = forwarded_for.split(",")[0].strip()
+            logger.debug(f"X-Forwarded-For에서 추출된 IP: {client_ip}")
+            return client_ip
+        
+        # X-Real-IP 헤더 확인
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            logger.debug(f"X-Real-IP에서 추출된 IP: {real_ip.strip()}")
+            return real_ip.strip()
+        
+        # 직접 연결된 클라이언트 IP
+        if hasattr(request, 'client') and request.client:
+            client_ip = request.client.host
+            logger.debug(f"직접 연결된 클라이언트 IP: {client_ip}")
+            return client_ip
+        
+        logger.warning("클라이언트 IP를 찾을 수 없음, unknown 반환")
+        return "unknown"
