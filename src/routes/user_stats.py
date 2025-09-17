@@ -181,7 +181,8 @@ def get_user_stats_overview(
 @router.get("/user/stats/by-api-key")
 def get_user_stats_by_api_key(
     request: Request,
-    period: str = Query("month", description="통계 기간: today, week, month")
+    period: str = Query("month", description="통계 기간: today, week, month"),
+    include_inactive_deleted: bool = Query(False, description="비활성+삭제 키 포함 여부")
 ):
     """API 키별 상세 통계 조회"""
     try:
@@ -197,17 +198,27 @@ def get_user_stats_by_api_key(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 기간 내 활동한 모든 API 키 조회 (비활성 포함)
-                cursor.execute(f"""
-                    SELECT 
-                        DISTINCT dus.api_key AS key_id,
-                        COALESCE(ak.name, dus.api_key) AS name,
-                        COALESCE(ak.is_active, 0) AS is_active
-                    FROM daily_user_api_stats dus
-                    LEFT JOIN api_keys ak ON ak.key_id = dus.api_key
-                    WHERE dus.user_id = %s AND {get_date_filter(period)}
-                    ORDER BY name DESC
-                """, (user_id,))
+                if include_inactive_deleted:
+                    # 기간 내 활동한 모든 키(비활성/삭제 포함)
+                    cursor.execute(f"""
+                        SELECT 
+                            DISTINCT dus.api_key AS key_id,
+                            COALESCE(ak.name, dus.api_key) AS name,
+                            COALESCE(ak.is_active, 0) AS is_active,
+                            CASE WHEN ak.key_id IS NULL THEN 1 ELSE 0 END AS is_deleted
+                        FROM daily_user_api_stats dus
+                        LEFT JOIN api_keys ak ON ak.key_id = dus.api_key
+                        WHERE dus.user_id = %s AND {get_date_filter(period)}
+                        ORDER BY name DESC
+                    """, (user_id,))
+                else:
+                    # 활성 키만
+                    cursor.execute("""
+                        SELECT key_id, name, 1 AS is_active, 0 AS is_deleted
+                        FROM api_keys 
+                        WHERE user_id = %s AND is_active = 1
+                        ORDER BY created_at DESC
+                    """, (user_id,))
                 api_keys = cursor.fetchall()
                 
                 if not api_keys:
