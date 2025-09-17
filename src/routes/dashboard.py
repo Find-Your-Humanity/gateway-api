@@ -155,11 +155,13 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                 
                 monthly_usage_by_type = cursor.fetchall()
                 
-                # 월별 데이터 포맷팅 (당월부터 역순으로 6개월)
+                # 월별 데이터 포맷팅 (정순으로 6개월: 4월부터 9월까지)
                 monthly_usage_data = []
-                current_date = today.replace(day=1)  # 당월 1일부터 시작
+                # 5개월 전부터 시작 (4월)
+                start_date = today.replace(day=1) - timedelta(days=150)
+                current_date = start_date.replace(day=1)
                 
-                for i in range(6):  # 당월부터 역순으로 6개월
+                for i in range(6):  # 정순으로 6개월
                     year = current_date.year
                     month_num = current_date.month
                     
@@ -184,11 +186,11 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                     
                     monthly_usage_data.append(month_stats)
                     
-                    # 이전 달로 이동
-                    if month_num == 1:
-                        current_date = current_date.replace(year=year - 1, month=12, day=1)
+                    # 다음 달로 이동
+                    if month_num == 12:
+                        current_date = current_date.replace(year=year + 1, month=1, day=1)
                     else:
-                        current_date = current_date.replace(month=month_num - 1, day=1)
+                        current_date = current_date.replace(month=month_num + 1, day=1)
                 
                 return {
                     "success": True,
