@@ -321,13 +321,19 @@ async def get_ip_stats(request: Request, key_id: Optional[str] = Query(None, des
 @router.post("/block-ip")
 async def block_ip(
     request: Request,
-    ip_address: str,
-    reason: str = "Manual block"
+    block_data: dict
 ):
     """
     특정 IP를 차단합니다.
     """
     try:
+        # 요청 데이터에서 IP와 사유 추출
+        ip_address = block_data.get("ip_address")
+        reason = block_data.get("reason", "Manual block")
+        
+        if not ip_address:
+            raise HTTPException(status_code=422, detail="ip_address is required")
+        
         # API 키에서 사용자 정보 추출
         api_key = request.headers.get("X-API-Key")
         if not api_key:
@@ -388,12 +394,18 @@ async def block_ip(
 @router.post("/unblock-ip")
 async def unblock_ip(
     request: Request,
-    ip_address: str
+    unblock_data: dict
 ):
     """
     특정 IP의 차단을 해제합니다.
     """
     try:
+        # 요청 데이터에서 IP 추출
+        ip_address = unblock_data.get("ip_address")
+        
+        if not ip_address:
+            raise HTTPException(status_code=422, detail="ip_address is required")
+        
         # API 키에서 사용자 정보 추출
         api_key = request.headers.get("X-API-Key")
         if not api_key:
