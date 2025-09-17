@@ -431,19 +431,8 @@ async def block_ip(
         if not ip_address:
             raise HTTPException(status_code=422, detail="ip_address is required")
         
-        # API 키에서 사용자 정보 추출
-        api_key = request.headers.get("X-API-Key")
-        if not api_key:
-            raise HTTPException(status_code=401, detail="API key required")
-        
-        # API 키로 사용자 정보 조회
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
-                result = cursor.fetchone()
-                if not result:
-                    raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = result["user_id"] if isinstance(result, dict) else result[0]
+        # 세션에서 사용자 정보 추출
+        user_id = _resolve_user_id_from_request(request)
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -503,19 +492,8 @@ async def unblock_ip(
         if not ip_address:
             raise HTTPException(status_code=422, detail="ip_address is required")
         
-        # API 키에서 사용자 정보 추출
-        api_key = request.headers.get("X-API-Key")
-        if not api_key:
-            raise HTTPException(status_code=401, detail="API key required")
-        
-        # API 키로 사용자 정보 조회
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
-                result = cursor.fetchone()
-                if not result:
-                    raise HTTPException(status_code=401, detail="Invalid API key")
-                user_id = result["user_id"] if isinstance(result, dict) else result[0]
+        # 세션에서 사용자 정보 추출
+        user_id = _resolve_user_id_from_request(request)
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
