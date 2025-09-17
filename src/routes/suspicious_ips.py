@@ -60,6 +60,48 @@ async def test_ip_extraction(request: Request):
     }
 
 
+@router.post("/test-create-suspicious-ip")
+async def test_create_suspicious_ip(request: Request):
+    """테스트용 의심 IP 생성 엔드포인트"""
+    client_ip = _get_client_ip(request)
+    
+    # API 키에서 사용자 정보 추출
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key required")
+    
+    # API 키로 사용자 정보 조회
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT user_id FROM api_keys WHERE key_id = %s", (api_key,))
+            result = cursor.fetchone()
+            if not result:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            user_id = result["user_id"] if isinstance(result, dict) else result[0]
+    
+    # 의심 IP 직접 생성 (테스트용)
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            current_time = int(time.time())
+            cursor.execute("""
+                INSERT INTO suspicious_ips (api_key, ip_address, violation_count, first_violation_time, last_violation_time, is_blocked)
+                VALUES (%s, %s, %s, FROM_UNIXTIME(%s), FROM_UNIXTIME(%s), %s)
+                ON DUPLICATE KEY UPDATE
+                    violation_count = violation_count + 1,
+                    last_violation_time = FROM_UNIXTIME(%s),
+                    updated_at = CURRENT_TIMESTAMP
+            """, (api_key, client_ip, 1, current_time, current_time, False, current_time))
+            
+            conn.commit()
+    
+    return {
+        "message": f"테스트 의심 IP 생성 완료: {client_ip}",
+        "api_key": api_key[:20] + "...",
+        "user_id": user_id,
+        "timestamp": current_time
+    }
+
+
 def _resolve_user_id_from_request(request: Request) -> int:
     """세션 우선, 없으면 X-API-Key로 user_id 유도. 실패 시 401."""
     try:
