@@ -140,7 +140,7 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                 six_months_ago = today - timedelta(days=180)  # 대략 6개월
                 cursor.execute("""
                     SELECT 
-                        DATE_FORMAT(date, '%Y-%m') as month,
+                        DATE_FORMAT(date, '%%Y-%%m') as month,
                         YEAR(date) as year,
                         MONTH(date) as month_num,
                         api_type,
