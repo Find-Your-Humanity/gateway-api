@@ -197,12 +197,16 @@ def get_user_stats_by_api_key(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 사용자의 API 키 목록 조회
-                cursor.execute("""
-                    SELECT key_id, name, is_active, created_at
-                    FROM api_keys 
-                    WHERE user_id = %s AND is_active = 1
-                    ORDER BY created_at DESC
+                # 기간 내 활동한 모든 API 키 조회 (비활성 포함)
+                cursor.execute(f"""
+                    SELECT 
+                        DISTINCT dus.api_key AS key_id,
+                        COALESCE(ak.name, dus.api_key) AS name,
+                        COALESCE(ak.is_active, 0) AS is_active
+                    FROM daily_user_api_stats dus
+                    LEFT JOIN api_keys ak ON ak.key_id = dus.api_key
+                    WHERE dus.user_id = %s AND {get_date_filter(period)}
+                    ORDER BY name DESC
                 """, (user_id,))
                 api_keys = cursor.fetchall()
                 
