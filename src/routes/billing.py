@@ -341,14 +341,15 @@ async def get_current_plan(user=Depends(get_current_user_from_request)):
                     print(f"⚠️ user_subscriptions 테이블 조회 실패 (무시): {e}")
                     # 테이블이 없어도 계속 진행
                 
-                # 이번 달 사용량 조회 (request_logs 테이블 사용)
+                # 이번 달 사용량 조회 (daily_user_api_stats 테이블 사용)
                 current_month = date.today().replace(day=1)
                 cursor.execute("""
-                    SELECT COUNT(*) as total_calls,
-                           COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls,
-                           COUNT(CASE WHEN status_code != 200 THEN 1 END) as failed_calls
-                    FROM request_logs
-                    WHERE user_id = %s AND request_time >= %s
+                    SELECT 
+                        COALESCE(SUM(total_requests), 0) as total_calls,
+                        COALESCE(SUM(successful_requests), 0) as success_calls,
+                        COALESCE(SUM(failed_requests), 0) as failed_calls
+                    FROM daily_user_api_stats
+                    WHERE user_id = %s AND date >= %s
                 """, (user["id"], current_month))
                 
                 usage_data = cursor.fetchone()
@@ -433,22 +434,22 @@ async def get_usage_history(
     
     try:
         query = """
-            SELECT DATE(request_time) as date, 
-                   COUNT(*) as api_calls,
-                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls
-            FROM request_logs
+            SELECT date, 
+                   SUM(total_requests) as api_calls,
+                   SUM(successful_requests) as success_calls
+            FROM daily_user_api_stats
             WHERE user_id = %s
         """
         params = [user["id"]]
         
         if start_date:
-            query += " AND DATE(request_time) >= %s"
+            query += " AND date >= %s"
             params.append(start_date)
         if end_date:
-            query += " AND DATE(request_time) <= %s"
+            query += " AND date <= %s"
             params.append(end_date)
         
-        query += " GROUP BY DATE(request_time) ORDER BY date DESC LIMIT 30"
+        query += " GROUP BY date ORDER BY date DESC LIMIT 30"
         
         cursor.execute(query, params)
         
@@ -618,10 +619,11 @@ async def get_usage_stats(user=Depends(get_current_user_from_request)):
         # 이번 달 사용량
         current_month = date.today().replace(day=1)
         cursor.execute("""
-            SELECT COUNT(*) as total_calls,
-                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls
-            FROM request_logs
-            WHERE user_id = %s AND request_time >= %s
+            SELECT 
+                COALESCE(SUM(total_requests), 0) as total_calls,
+                COALESCE(SUM(successful_requests), 0) as success_calls
+            FROM daily_user_api_stats
+            WHERE user_id = %s AND date >= %s
         """, (user["id"], current_month))
         
         current_usage = cursor.fetchone()
@@ -633,10 +635,11 @@ async def get_usage_stats(user=Depends(get_current_user_from_request)):
             last_month = date(current_month.year, current_month.month - 1, 1)
         
         cursor.execute("""
-            SELECT COUNT(*) as total_calls,
-                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls
-            FROM request_logs
-            WHERE user_id = %s AND request_time >= %s AND request_time < %s
+            SELECT 
+                COALESCE(SUM(total_requests), 0) as total_calls,
+                COALESCE(SUM(successful_requests), 0) as success_calls
+            FROM daily_user_api_stats
+            WHERE user_id = %s AND date >= %s AND date < %s
         """, (user["id"], last_month, current_month))
         
         last_month_usage = cursor.fetchone()
@@ -734,10 +737,11 @@ async def get_usage_stats(user=Depends(get_current_user_from_request)):
         # 이번 달 사용량
         current_month = date.today().replace(day=1)
         cursor.execute("""
-            SELECT COUNT(*) as total_calls,
-                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls
-            FROM request_logs
-            WHERE user_id = %s AND request_time >= %s
+            SELECT 
+                COALESCE(SUM(total_requests), 0) as total_calls,
+                COALESCE(SUM(successful_requests), 0) as success_calls
+            FROM daily_user_api_stats
+            WHERE user_id = %s AND date >= %s
         """, (user["id"], current_month))
         
         current_usage = cursor.fetchone()
@@ -749,10 +753,11 @@ async def get_usage_stats(user=Depends(get_current_user_from_request)):
             last_month = date(current_month.year, current_month.month - 1, 1)
         
         cursor.execute("""
-            SELECT COUNT(*) as total_calls,
-                   COUNT(CASE WHEN status_code = 200 THEN 1 END) as success_calls
-            FROM request_logs
-            WHERE user_id = %s AND request_time >= %s AND request_time < %s
+            SELECT 
+                COALESCE(SUM(total_requests), 0) as total_calls,
+                COALESCE(SUM(successful_requests), 0) as success_calls
+            FROM daily_user_api_stats
+            WHERE user_id = %s AND date >= %s AND date < %s
         """, (user["id"], last_month, current_month))
         
         last_month_usage = cursor.fetchone()
