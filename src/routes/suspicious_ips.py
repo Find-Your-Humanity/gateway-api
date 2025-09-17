@@ -8,9 +8,56 @@ from typing import List, Dict, Any, Optional
 from src.config.database import get_db_connection
 from src.routes.auth import get_current_user_from_request
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["Suspicious IP Management"])
+
+
+def _get_client_ip(request: Request) -> str:
+    """클라이언트 IP 주소를 추출합니다."""
+    # X-Forwarded-For 헤더 확인 (프록시/로드밸런서 환경)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # 첫 번째 IP가 실제 클라이언트 IP
+        client_ip = forwarded_for.split(",")[0].strip()
+        logger.info(f"X-Forwarded-For에서 추출된 IP: {client_ip}")
+        return client_ip
+    
+    # X-Real-IP 헤더 확인
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        logger.info(f"X-Real-IP에서 추출된 IP: {real_ip.strip()}")
+        return real_ip.strip()
+    
+    # 직접 연결된 클라이언트 IP
+    if hasattr(request, 'client') and request.client:
+        client_ip = request.client.host
+        logger.info(f"직접 연결된 클라이언트 IP: {client_ip}")
+        return client_ip
+    
+    logger.warning("클라이언트 IP를 찾을 수 없음, unknown 반환")
+    return "unknown"
+
+
+@router.get("/test-ip")
+async def test_ip_extraction(request: Request):
+    """IP 추출 테스트용 엔드포인트"""
+    client_ip = _get_client_ip(request)
+    
+    # 모든 헤더 정보 수집
+    headers_info = {}
+    for header_name, header_value in request.headers.items():
+        if any(keyword in header_name.lower() for keyword in ['ip', 'forward', 'real', 'client', 'remote']):
+            headers_info[header_name] = header_value
+    
+    return {
+        "extracted_ip": client_ip,
+        "client_host": getattr(request.client, 'host', 'unknown') if hasattr(request, 'client') and request.client else 'unknown',
+        "relevant_headers": headers_info,
+        "all_headers": dict(request.headers),
+        "timestamp": int(time.time())
+    }
 
 
 def _resolve_user_id_from_request(request: Request) -> int:
