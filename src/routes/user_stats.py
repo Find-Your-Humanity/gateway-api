@@ -48,7 +48,7 @@ def get_date_filter(period: str, table_name: str = "daily_user_api_stats") -> st
             return "date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"
         else:
             return "date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"  # 기본값: 한달
-    elif table_name == "api_request_logs":
+    elif table_name == "api_request_logs" or table_name == "arl":
         # api_request_logs는 created_at 컬럼 사용
         time_col = "created_at"
         if period == "today":
@@ -588,7 +588,7 @@ def get_user_hourly_chart_data(
                             COUNT(*) AS total
                         FROM api_request_logs arl
                         JOIN api_keys ak ON arl.api_key = ak.key_id
-                        WHERE ak.user_id = %s AND {get_date_filter(period, "api_request_logs")}
+                        WHERE ak.user_id = %s AND {get_date_filter(period, "arl")}
                         GROUP BY d
                         ORDER BY d
                     """
@@ -604,7 +604,7 @@ def get_user_hourly_chart_data(
                         FROM request_logs rl
                         WHERE rl.user_id = %s
                           AND rl.path IN (%s, %s, %s)
-                          AND {get_date_filter(period, "request_logs")}
+                          AND {get_date_filter(period, "rl")}
                         GROUP BY d
                         ORDER BY d
                     """
