@@ -415,9 +415,10 @@ def update_user(
 def delete_user(
     user_id: int,
     request: Request,
-    admin_user = Depends(require_admin)
+    admin_user = Depends(require_admin),
+    force: bool = Query(False)
 ):
-    """사용자 하드 삭제"""
+    """사용자 하드 삭제 (force=true 시 연관 레코드 선삭제)"""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -425,7 +426,11 @@ def delete_user(
                 if admin_user['id'] == user_id:
                     raise HTTPException(status_code=400, detail="자기 자신은 삭제할 수 없습니다.")
                 
-                # 실제 삭제 수행
+                if force:
+                    cursor.execute("DELETE FROM user_subscriptions WHERE user_id = %s", (user_id,))
+                    cursor.execute("DELETE FROM payment_logs WHERE user_id = %s", (user_id,))
+                    conn.commit()
+
                 cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
                 affected = cursor.rowcount or 0
                 conn.commit()

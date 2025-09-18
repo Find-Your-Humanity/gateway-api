@@ -132,10 +132,20 @@ def update_user(
 
 
 @router.delete("/api/admin/users/{user_id}")
-def delete_user(user_id: int = Path(..., ge=1)):
+def delete_user(
+    user_id: int = Path(..., ge=1),
+    force: bool = Query(False)
+):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                if force:
+                    # 연관 데이터 정리 (제약으로 막히는 테이블 우선)
+                    cursor.execute("DELETE FROM user_subscriptions WHERE user_id = %s", (user_id,))
+                    cursor.execute("DELETE FROM payment_logs WHERE user_id = %s", (user_id,))
+                    # 기타 토큰류/세션류는 CASCADE 또는 자체 정리 로직 존재
+                    conn.commit()
+
                 cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
                 affected = cursor.rowcount or 0
                 conn.commit()
@@ -143,7 +153,6 @@ def delete_user(user_id: int = Path(..., ge=1)):
                     raise HTTPException(status_code=404, detail="User not found")
         return {"success": True, "deleted": affected}
     except Exception as e:
-        # 외래키 제약 등으로 삭제 실패 시 409로 반환
         msg = str(e)
         if "foreign key" in msg.lower() or "constraint" in msg.lower():
             raise HTTPException(status_code=409, detail="Cannot delete user due to related records")
