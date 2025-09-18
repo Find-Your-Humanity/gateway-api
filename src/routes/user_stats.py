@@ -145,12 +145,45 @@ def get_user_stats_overview(
                 peak_daily_requests = int(peak_result['daily_total'] or 0) if peak_result else 0
                 peak_date = peak_result['peak_date'] if peak_result else None
                 
-                # 캡차 타입별 통계 포맷팅 (기존 방식)
+                # 캡차 타입별 성공률을 request_logs 기반으로 재계산 (세 verify 경로만)
+                logs_type_ratio_query = f"""
+                    SELECT 
+                        CASE 
+                          WHEN path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                          WHEN path = '/api/abstract-verify' THEN 'abstract'
+                          WHEN path = '/api/handwriting-verify' THEN 'handwriting'
+                        END AS captcha_type,
+                        SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
+                        COUNT(*) AS total_requests
+                    FROM request_logs
+                    WHERE user_id = %s
+                      AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                      AND {get_date_filter(period, "request_logs")}
+                    GROUP BY captcha_type
+                """
+                cursor.execute(logs_type_ratio_query, (user_id,))
+                rows = cursor.fetchall() or []
+                type_to_ratio: Dict[str, Dict[str, int]] = {}
+                for r in rows:
+                    ct = r.get('captcha_type')
+                    if ct:
+                        type_to_ratio[ct] = {
+                            'success': int(r.get('success_requests') or 0),
+                            'total': int(r.get('total_requests') or 0)
+                        }
+
+                # 캡차 타입별 통계 포맷팅: 수치는 기존 집계 사용, 성공률만 request_logs 기반으로 교체
                 captcha_types = []
                 for stat in type_stats:
-                    type_success_rate = (stat['success_requests'] / stat['total_requests'] * 100) if stat['total_requests'] > 0 else 0
+                    ct = stat['captcha_type']
+                    ratio = type_to_ratio.get(ct)
+                    if ratio and ratio['total'] > 0:
+                        type_success_rate = (ratio['success'] / ratio['total'] * 100)
+                    else:
+                        # 로그에 없으면 기존 집계 기반으로 계산
+                        type_success_rate = (stat['success_requests'] / stat['total_requests'] * 100) if stat['total_requests'] > 0 else 0
                     captcha_types.append({
-                        "captcha_type": stat['captcha_type'],
+                        "captcha_type": ct,
                         "total_requests": stat['total_requests'],
                         "success_requests": stat['success_requests'],
                         "failed_requests": stat['failed_requests'],
@@ -284,18 +317,66 @@ def get_user_stats_by_api_key(
                     total_requests = int(key_overview['total_requests'] or 0)
                     success_requests = int(key_overview['success_requests'] or 0)
                     failed_requests = int(key_overview['failed_requests'] or 0)
-                    success_rate = (success_requests / total_requests * 100) if total_requests > 0 else 0.0
                     avg_response_time = float(key_overview['avg_response_time'] or 0.0)
+
+                    # 키별 성공률만 request_logs 기반(세 verify 경로)으로 재계산
+                    key_success_ratio_query = f"""
+                        SELECT 
+                            SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
+                            COUNT(*) AS total_requests
+                        FROM request_logs
+                        WHERE user_id = %s AND api_key = %s
+                          AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                          AND {get_date_filter(period, "request_logs")}
+                    """
+                    cursor.execute(key_success_ratio_query, (user_id, key_id))
+                    key_ratio = cursor.fetchone() or {"success_requests": 0, "total_requests": 0}
+                    if (key_ratio.get("total_requests") or 0) > 0:
+                        success_rate = (key_ratio["success_requests"] / key_ratio["total_requests"] * 100)
+                    else:
+                        success_rate = (success_requests / total_requests * 100) if total_requests > 0 else 0.0
                     
-                    # 캡차 타입별 통계 포맷팅 (안전한 타입 변환)
+                    # 캡차 타입별 통계 포맷팅: 성공률만 request_logs 기준으로 재계산
+                    # 먼저 로그에서 키+타입별 성공/총합 집계
+                    key_logs_type_ratio_query = f"""
+                        SELECT 
+                            CASE 
+                              WHEN path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                              WHEN path = '/api/abstract-verify' THEN 'abstract'
+                              WHEN path = '/api/handwriting-verify' THEN 'handwriting'
+                            END AS captcha_type,
+                            SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
+                            COUNT(*) AS total_requests
+                        FROM request_logs
+                        WHERE user_id = %s AND api_key = %s
+                          AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                          AND {get_date_filter(period, "request_logs")}
+                        GROUP BY captcha_type
+                    """
+                    cursor.execute(key_logs_type_ratio_query, (user_id, key_id))
+                    key_type_rows = cursor.fetchall() or []
+                    type_ratio_map: Dict[str, Dict[str, int]] = {}
+                    for r in key_type_rows:
+                        ct = r.get('captcha_type')
+                        if ct:
+                            type_ratio_map[ct] = {
+                                'success': int(r.get('success_requests') or 0),
+                                'total': int(r.get('total_requests') or 0)
+                            }
+
                     captcha_types = []
                     for stat in key_type_stats:
+                        ct = stat['captcha_type']
                         stat_total = int(stat['total_requests'] or 0)
                         stat_success = int(stat['success_requests'] or 0)
                         stat_failed = int(stat['failed_requests'] or 0)
-                        type_success_rate = (stat_success / stat_total * 100) if stat_total > 0 else 0.0
+                        ratio = type_ratio_map.get(ct)
+                        if ratio and ratio['total'] > 0:
+                            type_success_rate = (ratio['success'] / ratio['total'] * 100)
+                        else:
+                            type_success_rate = (stat_success / stat_total * 100) if stat_total > 0 else 0.0
                         captcha_types.append({
-                            "captcha_type": stat['captcha_type'],
+                            "captcha_type": ct,
                             "total_requests": stat_total,
                             "success_requests": stat_success,
                             "failed_requests": stat_failed,

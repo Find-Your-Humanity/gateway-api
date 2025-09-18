@@ -189,7 +189,8 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                         'handwriting': 0,
                         'abstract': 0,
                         'imagecaptcha': 0,
-                        'total': 0
+                        'total': 0,
+                        'pass': 0
                     }
                     
                     for data in month_data:
@@ -198,6 +199,17 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                         month_stats[api_type] = requests
                         month_stats['total'] += requests
                     
+                    # pass = total - (handwriting + abstract + imagecaptcha)
+                    try:
+                        calculated_pass = max(0, (month_stats.get('total') or 0) - (
+                            (month_stats.get('handwriting') or 0) +
+                            (month_stats.get('abstract') or 0) +
+                            (month_stats.get('imagecaptcha') or 0)
+                        ))
+                    except Exception:
+                        calculated_pass = 0
+                    month_stats['pass'] = calculated_pass
+
                     monthly_usage_data.append(month_stats)
                     
                     # 다음 달로 이동
