@@ -584,13 +584,13 @@ def get_user_hourly_chart_data(
                     total_sql = f"""
                         SELECT 
                             DATE(arl.created_at) AS d,
-                            DATE_FORMAT(arl.created_at, '%%m/%%d') AS label,
+                            DATE_FORMAT(DATE(arl.created_at), '%%m/%%d') AS label,
                             COUNT(*) AS total
                         FROM api_request_logs arl
                         JOIN api_keys ak ON arl.api_key = ak.key_id
                         WHERE ak.user_id = %s AND {get_date_filter(period, "arl")}
-                        GROUP BY d
-                        ORDER BY d
+                        GROUP BY DATE(arl.created_at)
+                        ORDER BY DATE(arl.created_at)
                     """
                     cursor.execute(total_sql, (user_id,))
                     total_rows = {str(r['d']): {"label": r['label'], "total": int(r['total'] or 0)} for r in (cursor.fetchall() or [])}
@@ -605,8 +605,8 @@ def get_user_hourly_chart_data(
                         WHERE rl.user_id = %s
                           AND rl.path IN (%s, %s, %s)
                           AND {get_date_filter(period, "rl")}
-                        GROUP BY d
-                        ORDER BY d
+                        GROUP BY DATE(rl.request_time)
+                        ORDER BY DATE(rl.request_time)
                     """
                     cursor.execute(result_sql, (user_id, *verify_paths))
                     result_rows = {str(r['d']): r for r in (cursor.fetchall() or [])}
