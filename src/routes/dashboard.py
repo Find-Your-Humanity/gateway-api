@@ -421,7 +421,13 @@ def get_user_key_stats(
                           AND DATE(rl.request_time) >= %s
                           AND rl.path IN (%s, %s, %s)
                           {api_key_filter.replace('arl.api_key', 'rl.api_key')}
-                        GROUP BY DATE(rl.request_time), api_type
+                        GROUP BY DATE(rl.request_time), 
+                                 CASE
+                                     WHEN rl.path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                                     WHEN rl.path = '/api/abstract-verify' THEN 'abstract'
+                                     WHEN rl.path = '/api/handwriting-verify' THEN 'handwriting'
+                                     ELSE 'unknown'
+                                 END
                         ORDER BY d, api_type
                     """
                     result_params = [current_user["id"], start_date] + verify_paths + api_key_params
@@ -517,7 +523,13 @@ def get_user_key_stats(
                           AND DATE(rl.request_time) >= %s
                           AND rl.path IN (%s, %s, %s)
                           {api_key_filter.replace('arl.api_key', 'rl.api_key')}
-                        GROUP BY YEARWEEK(rl.request_time, 3), api_type
+                        GROUP BY YEARWEEK(rl.request_time, 3), 
+                                 CASE
+                                     WHEN rl.path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                                     WHEN rl.path = '/api/abstract-verify' THEN 'abstract'
+                                     WHEN rl.path = '/api/handwriting-verify' THEN 'handwriting'
+                                     ELSE 'unknown'
+                                 END
                         ORDER BY yw, api_type
                     """
                     result_params = [current_user["id"], start_date] + verify_paths + api_key_params
@@ -613,7 +625,13 @@ def get_user_key_stats(
                           AND DATE(rl.request_time) >= %s
                           AND rl.path IN (%s, %s, %s)
                           {api_key_filter.replace('arl.api_key', 'rl.api_key')}
-                        GROUP BY DATE_FORMAT(rl.request_time, '%%Y-%%m'), api_type
+                        GROUP BY DATE_FORMAT(rl.request_time, '%%Y-%%m'), 
+                                 CASE
+                                     WHEN rl.path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                                     WHEN rl.path = '/api/abstract-verify' THEN 'abstract'
+                                     WHEN rl.path = '/api/handwriting-verify' THEN 'handwriting'
+                                     ELSE 'unknown'
+                                 END
                         ORDER BY ym, api_type
                     """
                     result_params = [current_user["id"], start_date] + verify_paths + api_key_params
