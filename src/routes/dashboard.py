@@ -575,7 +575,7 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 # 사용자 플랜 정보 조회 (users.plan_id → plans 테이블)
                 cursor.execute(
                     """
-                    SELECT p.plan_type, p.rate_limit_per_minute, p.rate_limit_per_day, p.monthly_request_limit, p.concurrent_requests,
+                    SELECT p.plan_type, p.rate_limit_per_minute, p.monthly_request_limit, p.concurrent_requests,
                            p.display_name, p.features
                     FROM users u
                     LEFT JOIN plans p ON u.plan_id = p.id
@@ -590,10 +590,13 @@ def get_usage_limits(request: Request, current_user = Depends(require_auth)):
                 
                 # 플랜별 제한 설정 (plans 테이블에서 가져온 값 또는 기본값)
                 if plan_data:
+                    monthly_limit = plan_data.get("monthly_request_limit", 30000)
+                    # 일일 제한은 월간 제한을 30으로 나눈 값으로 계산
+                    daily_limit = max(1000, monthly_limit // 30)
                     limits = {
                         "perMinute": plan_data.get("rate_limit_per_minute", 60),
-                        "perDay": plan_data.get("rate_limit_per_day", 1000),
-                        "perMonth": plan_data.get("monthly_request_limit", 30000)
+                        "perDay": daily_limit,
+                        "perMonth": monthly_limit
                     }
                 else:
                     # 기본 free 플랜 제한
