@@ -48,6 +48,17 @@ def get_date_filter(period: str, table_name: str = "daily_user_api_stats") -> st
             return "date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"
         else:
             return "date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"  # 기본값: 한달
+    elif table_name == "api_request_logs":
+        # api_request_logs는 created_at 컬럼 사용
+        time_col = "created_at"
+        if period == "today":
+            return f"DATE({table_name}.{time_col}) = CURDATE()"
+        elif period == "week":
+            return f"{table_name}.{time_col} >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+        elif period == "month":
+            return f"{table_name}.{time_col} >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+        else:
+            return f"{table_name}.{time_col} >= DATE_SUB(NOW(), INTERVAL 30 DAY)"  # 기본값: 한달
     else:
         # request_logs는 request_time 컬럼 사용
         time_col = "request_time"
