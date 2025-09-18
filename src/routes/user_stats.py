@@ -645,7 +645,9 @@ def get_user_hourly_chart_data(
                         ORDER BY DATE(arl.created_at)
                     """
                     cursor.execute(rerender_sql, (user_id, *verify_paths))
-                    rerender_rows = {str(r['d']): int(r.get('rerender_cnt') or 0) for r in (cursor.fetchall() or [])}
+                    rerender_data = cursor.fetchall() or []
+                    logger.info(f"리렌더링 데이터 조회 결과: {rerender_data}")
+                    rerender_rows = {str(r['d']): int(r.get('rerender_cnt') or 0) for r in rerender_data}
 
                     # 병합 (총횟수 기준 날짜만 사용)
                     chart_data = []
@@ -655,6 +657,7 @@ def get_user_hourly_chart_data(
                         failed = int(r.get('fail_cnt', 0) or 0)
                         # 리렌더링: 비-verify 엔드포인트 요청 수
                         rerender = int(rerender_rows.get(d, 0))
+                        logger.info(f"날짜 {d}: 총={int(meta['total'] or 0)}, 성공={success}, 실패={failed}, 리렌더링={rerender}")
                         chart_data.append({
                             "time": meta['label'],
                             "requests": int(meta['total'] or 0),
