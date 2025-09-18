@@ -515,68 +515,104 @@ def get_user_hourly_chart_data(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                verify_paths = (
+                    '/api/imagecaptcha-verify',
+                    '/api/abstract-verify',
+                    '/api/handwriting-verify',
+                )
+
                 if period == "today":
-                    # 오늘 시간별 데이터 (0~23시, 2시간 단위로 집계)
-                    chart_query = """
+                    # 총횟수: api_request_logs (사용자 소유 키, 오늘, 2시간 단위)
+                    total_sql = """
                         SELECT 
-                            FLOOR(HOUR(arl.created_at) / 2) * 2 as hour_group,
-                            COUNT(*) as total_requests,
-                            COALESCE(SUM(CASE WHEN arl.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) as success_requests,
-                            COALESCE(SUM(CASE WHEN arl.status_code >= 400 THEN 1 ELSE 0 END), 0) as failed_requests
+                            FLOOR(HOUR(arl.created_at) / 2) * 2 AS hour_group,
+                            COUNT(*) AS total
                         FROM api_request_logs arl
                         JOIN api_keys ak ON arl.api_key = ak.key_id
                         WHERE ak.user_id = %s AND DATE(arl.created_at) = CURDATE()
                         GROUP BY hour_group
                         ORDER BY hour_group
                     """
-                    cursor.execute(chart_query, (user_id,))
-                    raw_data = cursor.fetchall()
-                    
-                    # 0~23시 데이터를 2시간 단위로 생성 (00, 02, 04, ..., 22)
-                    chart_data = []
-                    data_dict = {int(row['hour_group']): row for row in raw_data}
-                    
-                    for hour in range(0, 24, 2):
-                        if hour in data_dict:
-                            row = data_dict[hour]
-                            chart_data.append({
-                                "time": f"{hour:02d}시",
-                                "requests": int(row['total_requests']),
-                                "success": int(row['success_requests']),
-                                "failed": int(row['failed_requests'])
-                            })
-                        else:
-                            chart_data.append({
-                                "time": f"{hour:02d}시",
-                                "requests": 0,
-                                "success": 0,
-                                "failed": 0
-                            })
-                    
-                else:
-                    # week/month는 일별 데이터
-                    date_filter = get_date_filter(period, "daily_user_api_stats")
-                    chart_query = f"""
+                    cursor.execute(total_sql, (user_id,))
+                    total_rows = {int(r['hour_group']): int(r['total'] or 0) for r in (cursor.fetchall() or [])}
+
+                    # 성공/실패: request_logs (verify 3종, status_code 200/400/500, 오늘, 2시간 단위)
+                    result_sql = """
                         SELECT 
-                            DATE_FORMAT(date, '%%m/%%d') as time_label,
-                            COALESCE(SUM(total_requests), 0) as total_requests,
-                            COALESCE(SUM(successful_requests), 0) as success_requests,
-                            COALESCE(SUM(failed_requests), 0) as failed_requests
-                        FROM daily_user_api_stats
-                        WHERE user_id = %s AND {date_filter}
-                        GROUP BY date
-                        ORDER BY date
+                            FLOOR(HOUR(rl.request_time) / 2) * 2 AS hour_group,
+                            SUM(CASE WHEN rl.status_code = 200 THEN 1 ELSE 0 END) AS success_cnt,
+                            SUM(CASE WHEN rl.status_code IN (400,500) THEN 1 ELSE 0 END) AS fail_cnt
+                        FROM request_logs rl
+                        WHERE rl.user_id = %s
+                          AND rl.path IN (%s, %s, %s)
+                          AND DATE(rl.request_time) = CURDATE()
+                        GROUP BY hour_group
+                        ORDER BY hour_group
                     """
-                    cursor.execute(chart_query, (user_id,))
-                    raw_data = cursor.fetchall()
-                    
+                    cursor.execute(result_sql, (user_id, *verify_paths))
+                    result_rows = {int(r['hour_group']): r for r in (cursor.fetchall() or [])}
+
                     chart_data = []
-                    for row in raw_data:
+                    for hour in range(0, 24, 2):
+                        totals = int(total_rows.get(hour, 0))
+                        r = result_rows.get(hour, {})
+                        success = int(r.get('success_cnt', 0) or 0)
+                        failed = int(r.get('fail_cnt', 0) or 0)
+                        rerender = max(0, totals - success - failed)  # 리렌더링 = 총 - 성공 - 실패
                         chart_data.append({
-                            "time": row['time_label'],
-                            "requests": int(row['total_requests']),
-                            "success": int(row['success_requests']),
-                            "failed": int(row['failed_requests'])
+                            "time": f"{hour:02d}시",
+                            "requests": totals,
+                            "success": success,
+                            "failed": failed,
+                            "rerender": rerender,
+                        })
+
+                else:
+                    # 주/월 단위: 일별 집계
+                    # 총횟수: api_request_logs (사용자 소유 키)
+                    total_sql = f"""
+                        SELECT 
+                            DATE(arl.created_at) AS d,
+                            DATE_FORMAT(arl.created_at, '%%m/%%d') AS label,
+                            COUNT(*) AS total
+                        FROM api_request_logs arl
+                        JOIN api_keys ak ON arl.api_key = ak.key_id
+                        WHERE ak.user_id = %s AND {get_date_filter(period, "api_request_logs")}
+                        GROUP BY d
+                        ORDER BY d
+                    """
+                    cursor.execute(total_sql, (user_id,))
+                    total_rows = {str(r['d']): {"label": r['label'], "total": int(r['total'] or 0)} for r in (cursor.fetchall() or [])}
+
+                    # 성공/실패: request_logs (verify 3종, status 200/400/500)
+                    result_sql = f"""
+                        SELECT 
+                            DATE(rl.request_time) AS d,
+                            SUM(CASE WHEN rl.status_code = 200 THEN 1 ELSE 0 END) AS success_cnt,
+                            SUM(CASE WHEN rl.status_code IN (400,500) THEN 1 ELSE 0 END) AS fail_cnt
+                        FROM request_logs rl
+                        WHERE rl.user_id = %s
+                          AND rl.path IN (%s, %s, %s)
+                          AND {get_date_filter(period, "request_logs")}
+                        GROUP BY d
+                        ORDER BY d
+                    """
+                    cursor.execute(result_sql, (user_id, *verify_paths))
+                    result_rows = {str(r['d']): r for r in (cursor.fetchall() or [])}
+
+                    # 병합 (총횟수 기준 날짜만 사용)
+                    chart_data = []
+                    for d, meta in total_rows.items():
+                        r = result_rows.get(d, {})
+                        success = int(r.get('success_cnt', 0) or 0)
+                        failed = int(r.get('fail_cnt', 0) or 0)
+                        rerender = max(0, int(meta['total'] or 0) - success - failed)  # 리렌더링 = 총 - 성공 - 실패
+                        chart_data.append({
+                            "time": meta['label'],
+                            "requests": int(meta['total'] or 0),
+                            "success": success,
+                            "failed": failed,
+                            "rerender": rerender,
                         })
                 
                 return {
