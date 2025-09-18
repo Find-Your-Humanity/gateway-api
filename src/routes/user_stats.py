@@ -49,15 +49,15 @@ def get_date_filter(period: str, table_name: str = "daily_user_api_stats") -> st
         else:
             return "date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"  # 기본값: 한달
     else:
-        # request_logs 테이블은 request_time 컬럼 사용
+        # api_request_logs 테이블은 created_at 컬럼 사용
         if period == "today":
-            return f"DATE({table_name}.request_time) = CURDATE()"
+            return f"DATE({table_name}.created_at) = CURDATE()"
         elif period == "week":
-            return f"{table_name}.request_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+            return f"{table_name}.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
         elif period == "month":
-            return f"{table_name}.request_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+            return f"{table_name}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
         else:
-            return f"{table_name}.request_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)"  # 기본값: 한달
+            return f"{table_name}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"  # 기본값: 한달
 
 @router.get("/user/stats/overview")
 def get_user_stats_overview(
@@ -78,15 +78,15 @@ def get_user_stats_overview(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 1. 전체 통계 (모든 API 키 합계) - request_logs 테이블에서 실시간 계산
+                # 1. 전체 통계 (모든 API 키 합계) - api_request_logs 테이블에서 실시간 계산
                 overview_query = f"""
                     SELECT 
                         COUNT(*) as total_requests,
                         SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
                         SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
                         COALESCE(AVG(response_time), 0.0) as avg_response_time
-                    FROM request_logs
-                    WHERE user_id = %s AND user_id IS NOT NULL AND {get_date_filter(period, "request_logs")}
+                    FROM api_request_logs
+                    WHERE user_id = %s AND {get_date_filter(period, "api_request_logs")}
                 """
                 cursor.execute(overview_query, (user_id,))
                 overview = cursor.fetchone()
@@ -107,29 +107,17 @@ def get_user_stats_overview(
                         }
                     }
                 
-                # 2. 캡차 타입별 통계 - request_logs 테이블에서 실시간 계산
-                # api_type이 pass인 경우는 handwriting으로 매핑하여 처리
+                # 2. 캡차 타입별 통계 - api_request_logs 테이블에서 실시간 계산
                 type_query = f"""
                     SELECT 
-                        CASE 
-                            WHEN api_type = 'handwriting' THEN 'handwriting'
-                            WHEN api_type = 'abstract' THEN 'abstract'
-                            WHEN api_type = 'imagecaptcha' THEN 'imagecaptcha'
-                            ELSE 'unknown'
-                        END as captcha_type,
+                        COALESCE(api_type, 'unknown') as captcha_type,
                         COUNT(*) as total_requests,
                         SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
                         SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
                         COALESCE(AVG(response_time), 0.0) as avg_response_time
-                    FROM request_logs
-                    WHERE user_id = %s AND user_id IS NOT NULL AND {get_date_filter(period, "request_logs")}
-                    GROUP BY 
-                        CASE 
-                            WHEN api_type = 'handwriting' THEN 'handwriting'
-                            WHEN api_type = 'abstract' THEN 'abstract'
-                            WHEN api_type = 'imagecaptcha' THEN 'imagecaptcha'
-                            ELSE 'unknown'
-                        END
+                    FROM api_request_logs
+                    WHERE user_id = %s AND {get_date_filter(period, "api_request_logs")}
+                    GROUP BY api_type
                     ORDER BY total_requests DESC
                 """
                 cursor.execute(type_query, (user_id,))
@@ -138,15 +126,15 @@ def get_user_stats_overview(
                 # 성공률 계산
                 success_rate = (overview['success_requests'] / overview['total_requests'] * 100) if overview['total_requests'] > 0 else 0
                 
-                # 3. 최고 일일 요청수 조회 - request_logs 테이블에서 실시간 계산
-                date_filter_condition = get_date_filter(period, "request_logs")
+                # 3. 최고 일일 요청수 조회 - api_request_logs 테이블에서 실시간 계산
+                date_filter_condition = get_date_filter(period, "api_request_logs")
                 peak_query = f"""
                     SELECT 
-                        DATE_FORMAT(request_time, '%%Y-%%m-%%d') as peak_date,
+                        DATE_FORMAT(created_at, '%%Y-%%m-%%d') as peak_date,
                         COUNT(*) as daily_total
-                    FROM request_logs
-                    WHERE user_id = %s AND user_id IS NOT NULL AND {date_filter_condition}
-                    GROUP BY DATE(request_time)
+                    FROM api_request_logs
+                    WHERE user_id = %s AND {date_filter_condition}
+                    GROUP BY DATE(created_at)
                     ORDER BY daily_total DESC
                     LIMIT 1
                 """
@@ -211,16 +199,16 @@ def get_user_stats_by_api_key(
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 if include_inactive_deleted:
-                    # 기간 내 활동한 모든 키(비활성/삭제 포함) - request_logs에서 조회
+                    # 기간 내 활동한 모든 키(비활성/삭제 포함) - api_request_logs에서 조회
                     cursor.execute(f"""
                         SELECT 
-                            DISTINCT rl.api_key AS key_id,
-                            COALESCE(ak.name, rl.api_key) AS name,
+                            DISTINCT arl.api_key AS key_id,
+                            COALESCE(ak.name, arl.api_key) AS name,
                             COALESCE(ak.is_active, 0) AS is_active,
                             CASE WHEN ak.key_id IS NULL THEN 1 ELSE 0 END AS is_deleted
-                        FROM request_logs rl
-                        LEFT JOIN api_keys ak ON ak.key_id = rl.api_key
-                        WHERE rl.user_id = %s AND rl.user_id IS NOT NULL AND {get_date_filter(period, "request_logs")}
+                        FROM api_request_logs arl
+                        LEFT JOIN api_keys ak ON ak.key_id = arl.api_key
+                        WHERE arl.user_id = %s AND {get_date_filter(period, "api_request_logs")}
                         ORDER BY name DESC
                     """, (user_id,))
                 else:
@@ -248,42 +236,30 @@ def get_user_stats_by_api_key(
                     key_id = api_key['key_id']
                     key_name = api_key['name']
                     
-                    # API 키별 전체 통계 - request_logs 테이블에서 실시간 계산
+                    # API 키별 전체 통계 - api_request_logs 테이블에서 실시간 계산
                     key_query = f"""
                         SELECT 
                             COUNT(*) as total_requests,
                             SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
                             SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
                             COALESCE(AVG(response_time), 0.0) as avg_response_time
-                        FROM request_logs
-                        WHERE api_key = %s AND user_id = %s AND user_id IS NOT NULL AND {get_date_filter(period, "request_logs")}
+                        FROM api_request_logs
+                        WHERE api_key = %s AND user_id = %s AND {get_date_filter(period, "api_request_logs")}
                     """
                     cursor.execute(key_query, (key_id, user_id))
                     key_overview = cursor.fetchone()
                     
-                    # API 키별 캡차 타입 통계 - request_logs 테이블에서 실시간 계산
-                    # api_type이 pass인 경우는 handwriting으로 매핑하여 처리
+                    # API 키별 캡차 타입 통계 - api_request_logs 테이블에서 실시간 계산
                     key_type_query = f"""
                         SELECT 
-                            CASE 
-                                WHEN api_type = 'handwriting' THEN 'handwriting'
-                                WHEN api_type = 'abstract' THEN 'abstract'
-                                WHEN api_type = 'imagecaptcha' THEN 'imagecaptcha'
-                                ELSE 'unknown'
-                            END as captcha_type,
+                            COALESCE(api_type, 'unknown') as captcha_type,
                             COUNT(*) as total_requests,
                             SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
                             SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
                             COALESCE(AVG(response_time), 0.0) as avg_response_time
-                        FROM request_logs
-                        WHERE api_key = %s AND user_id = %s AND user_id IS NOT NULL AND {get_date_filter(period, "request_logs")}
-                        GROUP BY 
-                            CASE 
-                                WHEN api_type = 'handwriting' THEN 'handwriting'
-                                WHEN api_type = 'abstract' THEN 'abstract'
-                                WHEN api_type = 'imagecaptcha' THEN 'imagecaptcha'
-                                ELSE 'unknown'
-                            END
+                        FROM api_request_logs
+                        WHERE api_key = %s AND user_id = %s AND {get_date_filter(period, "api_request_logs")}
+                        GROUP BY api_type
                         ORDER BY total_requests DESC
                     """
                     cursor.execute(key_type_query, (key_id, user_id))
@@ -355,23 +331,23 @@ def get_user_stats_time_series(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # request_logs 테이블을 사용하여 시계열 데이터 조회
+                # api_request_logs 테이블을 사용하여 시계열 데이터 조회
                 # 기간에 따른 그룹화 설정
                 if period == "today":
                     # 오늘은 시간별 집계
                     date_format = "%H:00"
-                    date_filter = get_date_filter("today", "request_logs")
-                    group_by = "HOUR(request_time)"
+                    date_filter = get_date_filter("today", "api_request_logs")
+                    group_by = "HOUR(created_at)"
                 elif period == "week":
                     # 주간은 일별 집계
                     date_format = "%Y-%m-%d"
-                    date_filter = get_date_filter("week", "request_logs")
-                    group_by = "DATE(request_time)"
+                    date_filter = get_date_filter("week", "api_request_logs")
+                    group_by = "DATE(created_at)"
                 else:  # month
                     # 월간은 일별 집계
                     date_format = "%Y-%m-%d"
-                    date_filter = get_date_filter("month", "request_logs")
-                    group_by = "DATE(request_time)"
+                    date_filter = get_date_filter("month", "api_request_logs")
+                    group_by = "DATE(created_at)"
                 
                 # API 키 필터 추가
                 api_key_filter = ""
@@ -382,13 +358,13 @@ def get_user_stats_time_series(
                 
                 time_series_query = f"""
                     SELECT 
-                        DATE_FORMAT(request_time, '{date_format}') as time_label,
+                        DATE_FORMAT(created_at, '{date_format}') as time_label,
                         COUNT(*) as total_requests,
                         SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
                         SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
                         COALESCE(AVG(response_time), 0.0) as avg_response_time
-                    FROM request_logs
-                    WHERE user_id = %s AND user_id IS NOT NULL AND {date_filter} {api_key_filter}
+                    FROM api_request_logs
+                    WHERE user_id = %s AND {date_filter} {api_key_filter}
                     GROUP BY {group_by}
                     ORDER BY {group_by}
                 """
