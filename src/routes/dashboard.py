@@ -209,7 +209,7 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                     except Exception:
                         calculated_pass = 0
                     month_stats['pass'] = calculated_pass
-
+                    
                     monthly_usage_data.append(month_stats)
                     
                     # 다음 달로 이동
@@ -369,7 +369,7 @@ def get_user_key_stats(
                     api_key_filter = "AND arl.api_key = %s"
                     api_key_params = [api_key]
 
-                # API 타입 필터 조건
+                # API 타입 필터 조건 (전체일 때는 필터 없음)
                 api_type_filter = ""
                 api_type_params = []
                 if api_type != "all":
@@ -454,14 +454,14 @@ def get_user_key_stats(
                             'failed': int(row['failed'] or 0)
                         }
 
-                    # 결과 생성
-                    for d in days_list:
-                        d_str = d.strftime("%Y-%m-%d")
+                    # 결과 생성 - 데이터가 있는 날짜만 표시
+                    all_dates = set(total_data.keys()) | set(result_data.keys())
+                    for d_str in sorted(all_dates):
                         day_totals = total_data.get(d_str, {})
                         day_results = result_data.get(d_str, {})
 
                         if api_type == "all":
-                            # 전체 합계
+                            # 전체 합계 - 모든 타입의 데이터 합계
                             total = sum(day_totals.values())
                             success = sum(r.get('success', 0) for r in day_results.values())
                             failed = sum(r.get('failed', 0) for r in day_results.values())
@@ -472,6 +472,8 @@ def get_user_key_stats(
                             success = result.get('success', 0)
                             failed = result.get('failed', 0)
 
+                        # 데이터가 있는 경우만 결과에 추가
+                        if total > 0 or success > 0 or failed > 0:
                         rate = round((success / total) * 100, 1) if total else 0.0
                         results.append({
                             "totalRequests": total,
@@ -479,7 +481,7 @@ def get_user_key_stats(
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
-                            "date": d_str,
+                                "date": d_str,
                         })
 
                 elif period == "weekly":
@@ -556,12 +558,18 @@ def get_user_key_stats(
                             'failed': int(row['failed'] or 0)
                         }
 
-                    for yw, data in total_data.items():
+                    # 주간 결과 생성 - 데이터가 있는 주만 표시
+                    all_weeks = set(total_data.keys()) | set(result_data.keys())
+                    for yw in sorted(all_weeks):
+                        if yw not in total_data:
+                            continue
+                            
+                        data = total_data[yw]
                         week_start = data['week_start']
                         month = week_start.month
                         day = week_start.day
                         week_in_month = ((day - 1) // 7) + 1
-                        label = f"{month}월 {week_in_month}주차"
+                            label = f"{month}월 {week_in_month}주차"
 
                         day_totals = {k: v for k, v in data.items() if k != 'week_start'}
                         day_results = result_data.get(yw, {})
@@ -576,7 +584,9 @@ def get_user_key_stats(
                             success = result.get('success', 0)
                             failed = result.get('failed', 0)
 
-                        rate = round((success / total) * 100, 1) if total else 0.0
+                        # 데이터가 있는 경우만 결과에 추가
+                        if total > 0 or success > 0 or failed > 0:
+                            rate = round((success / total) * 100, 1) if total else 0.0
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
@@ -658,7 +668,13 @@ def get_user_key_stats(
                             'failed': int(row['failed'] or 0)
                         }
 
-                    for ym, day_totals in total_data.items():
+                    # 월간 결과 생성 - 데이터가 있는 월만 표시
+                    all_months = set(total_data.keys()) | set(result_data.keys())
+                    for ym in sorted(all_months):
+                        if ym not in total_data:
+                            continue
+                            
+                        day_totals = total_data[ym]
                         day_results = result_data.get(ym, {})
 
                         if api_type == "all":
@@ -671,6 +687,8 @@ def get_user_key_stats(
                             success = result.get('success', 0)
                             failed = result.get('failed', 0)
 
+                        # 데이터가 있는 경우만 결과에 추가
+                        if total > 0 or success > 0 or failed > 0:
                         rate = round((success / total) * 100, 1) if total else 0.0
                         results.append({
                             "totalRequests": total,
@@ -678,7 +696,7 @@ def get_user_key_stats(
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
-                            "date": ym,
+                                "date": ym,
                         })
 
                 return {
