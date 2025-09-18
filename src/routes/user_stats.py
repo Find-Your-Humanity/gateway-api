@@ -37,7 +37,7 @@ class UserStatsResponse(BaseModel):
     data: Dict[str, Any]
 
 def get_date_filter(period: str, table_name: str = "daily_user_api_stats") -> str:
-    """기간에 따른 날짜 필터 조건 반환"""
+    """기간에 따른 날짜 필터 조건 반환."""
     if table_name == "daily_user_api_stats":
         # daily_user_api_stats 테이블은 date 컬럼 사용
         if period == "today":
