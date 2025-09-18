@@ -377,33 +377,45 @@ def get_user_key_stats(
                     start_date = today - timedelta(days=safe_days - 1)
                     # 0 채움용 라벨 테이블 생성
                     days_list = [today - timedelta(days=i) for i in range(safe_days - 1, -1, -1)]
-                    # 파라미터 순서: user_id, start_date, (api_type?), (api_key?)
-                    base_sql = f"""
+                    
+                    # 총 요청 수: daily_user_api_stats에서 가져오기
+                    total_sql = f"""
                         SELECT date, 
-                               SUM(total_requests) AS total,
-                               SUM(successful_requests) AS success,
-                               SUM(failed_requests) AS failed
+                               SUM(total_requests) AS total
                         FROM daily_user_api_stats
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY date
                         ORDER BY date ASC
                         """
-                    # 올바른 파라미터 바인딩
                     bind_params = [current_user["id"], start_date]
                     if api_type != "all":
                         bind_params.append(api_type)
                     if api_key:
                         bind_params.append(api_key)
-                    cursor.execute(base_sql, bind_params)
-                    rows = {r["date"]: r for r in (cursor.fetchall() or [])}
+                    cursor.execute(total_sql, bind_params)
+                    total_rows = {r["date"]: int(r.get("total", 0)) for r in (cursor.fetchall() or [])}
+                    
+                    # 성공/실패: request_logs에서 verify 3종만 계산
+                    verify_paths = ('/api/imagecaptcha-verify', '/api/abstract-verify', '/api/handwriting-verify')
+                    success_fail_sql = f"""
+                        SELECT DATE(request_time) as date,
+                               SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success,
+                               SUM(CASE WHEN status_code IN (400,500) THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs
+                        WHERE user_id = %s 
+                          AND request_time >= %s
+                          AND path IN (%s, %s, %s)
+                        GROUP BY DATE(request_time)
+                        ORDER BY DATE(request_time) ASC
+                        """
+                    cursor.execute(success_fail_sql, [current_user["id"], start_date, *verify_paths])
+                    success_fail_rows = {r["date"]: r for r in (cursor.fetchall() or [])}
+                    
                     for d in days_list:
-                        r = rows.get(d)
-                        if r:
-                            total = int(r.get("total", 0))
-                            success = int(r.get("success", 0))
-                            failed = int(r.get("failed", 0))
-                        else:
-                            total = success = failed = 0
+                        total = total_rows.get(d, 0)
+                        sf_row = success_fail_rows.get(d, {})
+                        success = int(sf_row.get("success", 0))
+                        failed = int(sf_row.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
                         results.append({
                             "totalRequests": total,
@@ -416,12 +428,12 @@ def get_user_key_stats(
 
                 elif period == "weekly":
                     start_date = today - timedelta(days=28)
-                    base_sql = f"""
+                    
+                    # 총 요청 수: daily_user_api_stats에서 가져오기
+                    total_sql = f"""
                         SELECT YEARWEEK(date, 3) AS yw,
                                MIN(date) AS week_start,
-                               SUM(total_requests) AS total,
-                               SUM(successful_requests) AS success,
-                               SUM(failed_requests) AS failed
+                               SUM(total_requests) AS total
                         FROM daily_user_api_stats
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY YEARWEEK(date, 3)
@@ -432,12 +444,31 @@ def get_user_key_stats(
                         bind_params.append(api_type)
                     if api_key:
                         bind_params.append(api_key)
-                    cursor.execute(base_sql, bind_params)
-                    rows = cursor.fetchall() or []
-                    for r in rows:
+                    cursor.execute(total_sql, bind_params)
+                    total_rows = cursor.fetchall() or []
+                    
+                    # 성공/실패: request_logs에서 verify 3종만 계산
+                    verify_paths = ('/api/imagecaptcha-verify', '/api/abstract-verify', '/api/handwriting-verify')
+                    success_fail_sql = f"""
+                        SELECT YEARWEEK(request_time, 3) AS yw,
+                               SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success,
+                               SUM(CASE WHEN status_code IN (400,500) THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs
+                        WHERE user_id = %s 
+                          AND request_time >= %s
+                          AND path IN (%s, %s, %s)
+                        GROUP BY YEARWEEK(request_time, 3)
+                        ORDER BY yw ASC
+                        """
+                    cursor.execute(success_fail_sql, [current_user["id"], start_date, *verify_paths])
+                    success_fail_rows = {r["yw"]: r for r in (cursor.fetchall() or [])}
+                    
+                    for r in total_rows:
                         total = int(r.get("total", 0))
-                        success = int(r.get("success", 0))
-                        failed = int(r.get("failed", 0))
+                        yw = r["yw"]
+                        sf_row = success_fail_rows.get(yw, {})
+                        success = int(sf_row.get("success", 0))
+                        failed = int(sf_row.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
                         # 라벨을 "M월 N주차"로 변환 (주간의 시작일 기준)
                         try:
@@ -448,7 +479,7 @@ def get_user_key_stats(
                             week_in_month = ( (day - 1) // 7 ) + 1
                             label = f"{month}월 {week_in_month}주차"
                         except Exception:
-                            label = f"W{r['yw']}"
+                            label = f"W{yw}"
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
@@ -460,11 +491,11 @@ def get_user_key_stats(
 
                 else:  # monthly
                     start_date = today - timedelta(days=365)
-                    base_sql = f"""
+                    
+                    # 총 요청 수: daily_user_api_stats에서 가져오기
+                    total_sql = f"""
                         SELECT DATE_FORMAT(date, '%%Y-%%m') AS ym,
-                               SUM(total_requests) AS total,
-                               SUM(successful_requests) AS success,
-                               SUM(failed_requests) AS failed
+                               SUM(total_requests) AS total
                         FROM daily_user_api_stats
                         WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
                         GROUP BY DATE_FORMAT(date, '%%Y-%%m')
@@ -475,12 +506,31 @@ def get_user_key_stats(
                         bind_params.append(api_type)
                     if api_key:
                         bind_params.append(api_key)
-                    cursor.execute(base_sql, bind_params)
-                    rows = cursor.fetchall() or []
-                    for r in rows:
+                    cursor.execute(total_sql, bind_params)
+                    total_rows = cursor.fetchall() or []
+                    
+                    # 성공/실패: request_logs에서 verify 3종만 계산
+                    verify_paths = ('/api/imagecaptcha-verify', '/api/abstract-verify', '/api/handwriting-verify')
+                    success_fail_sql = f"""
+                        SELECT DATE_FORMAT(request_time, '%%Y-%%m') AS ym,
+                               SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success,
+                               SUM(CASE WHEN status_code IN (400,500) THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs
+                        WHERE user_id = %s 
+                          AND request_time >= %s
+                          AND path IN (%s, %s, %s)
+                        GROUP BY DATE_FORMAT(request_time, '%%Y-%%m')
+                        ORDER BY ym ASC
+                        """
+                    cursor.execute(success_fail_sql, [current_user["id"], start_date, *verify_paths])
+                    success_fail_rows = {r["ym"]: r for r in (cursor.fetchall() or [])}
+                    
+                    for r in total_rows:
                         total = int(r.get("total", 0))
-                        success = int(r.get("success", 0))
-                        failed = int(r.get("failed", 0))
+                        ym = r["ym"]
+                        sf_row = success_fail_rows.get(ym, {})
+                        success = int(sf_row.get("success", 0))
+                        failed = int(sf_row.get("failed", 0))
                         rate = round((success / total) * 100, 1) if total else 0.0
                         results.append({
                             "totalRequests": total,
@@ -488,7 +538,7 @@ def get_user_key_stats(
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
-                            "date": r['ym'],
+                            "date": ym,
                         })
 
                 return {
