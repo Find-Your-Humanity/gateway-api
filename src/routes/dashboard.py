@@ -404,11 +404,13 @@ def get_user_key_stats(
                         FROM request_logs
                         WHERE user_id = %s 
                           AND request_time >= %s
-                          AND path IN (%s, %s, %s){key_clause}
+                          AND path IN (%s, %s, %s){type_clause}{key_clause}
                         GROUP BY DATE(request_time)
                         ORDER BY DATE(request_time) ASC
                         """
                     success_fail_params = [current_user["id"], start_date, *verify_paths]
+                    if api_type != "all":
+                        success_fail_params.append(api_type)
                     if api_key:
                         success_fail_params.append(api_key)
                     cursor.execute(success_fail_sql, success_fail_params)
@@ -459,11 +461,13 @@ def get_user_key_stats(
                         FROM request_logs
                         WHERE user_id = %s 
                           AND request_time >= %s
-                          AND path IN (%s, %s, %s){key_clause}
+                          AND path IN (%s, %s, %s){type_clause}{key_clause}
                         GROUP BY YEARWEEK(request_time, 3)
                         ORDER BY yw ASC
                         """
                     success_fail_params = [current_user["id"], start_date, *verify_paths]
+                    if api_type != "all":
+                        success_fail_params.append(api_type)
                     if api_key:
                         success_fail_params.append(api_key)
                     cursor.execute(success_fail_sql, success_fail_params)
@@ -524,11 +528,13 @@ def get_user_key_stats(
                         FROM request_logs
                         WHERE user_id = %s 
                           AND request_time >= %s
-                          AND path IN (%s, %s, %s){key_clause}
+                          AND path IN (%s, %s, %s){type_clause}{key_clause}
                         GROUP BY DATE_FORMAT(request_time, '%%Y-%%m')
                         ORDER BY ym ASC
                         """
                     success_fail_params = [current_user["id"], start_date, *verify_paths]
+                    if api_type != "all":
+                        success_fail_params.append(api_type)
                     if api_key:
                         success_fail_params.append(api_key)
                     cursor.execute(success_fail_sql, success_fail_params)
