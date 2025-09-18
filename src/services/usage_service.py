@@ -104,16 +104,15 @@ class UsageService:
                     now = datetime.now()
                     today = date.today()
                     
-                    # 분당 리셋 (매분) - 현재 분이 바뀌었을 때만
-                    current_minute = now.minute
+                    # 분당 리셋 (매분)
+                    # 컬럼 존재 여부와 관계 없이 WHERE에서 참조하지 않도록 조건을 단순화
                     cursor.execute("""
                         UPDATE user_usage_tracking 
                         SET 
                             per_minute_count = 0,
                             per_minute_reset_time = %s
-                        WHERE tracking_date = %s 
-                        AND (per_minute_reset_time IS NULL OR MINUTE(per_minute_reset_time) != %s)
-                    """, (now, today, current_minute))
+                        WHERE tracking_date = %s
+                    """, (now, today))
                     
                     # 일일 리셋 (매일 자정) - 자정이 지났을 때만
                     if now.hour == 0 and now.minute == 0:
@@ -122,9 +121,8 @@ class UsageService:
                             SET 
                                 per_day_count = 0,
                                 per_day_reset_time = %s
-                            WHERE tracking_date = %s 
-                            AND (per_day_reset_time IS NULL OR DATE(per_day_reset_time) != %s)
-                        """, (now, today, today))
+                            WHERE tracking_date = %s
+                        """, (now, today))
                     
                     # 월간 리셋 (매월 1일) - 1일이 되었을 때만
                     if now.day == 1 and now.hour == 0 and now.minute == 0:
@@ -133,9 +131,8 @@ class UsageService:
                             SET 
                                 per_month_count = 0,
                                 per_month_reset_time = %s
-                            WHERE tracking_date = %s 
-                            AND (per_month_reset_time IS NULL OR DATE_FORMAT(per_month_reset_time, '%%Y-%%m') != DATE_FORMAT(%s, '%%Y-%%m'))
-                        """, (now, today, today))
+                            WHERE tracking_date = %s
+                        """, (now, today))
                     
                     conn.commit()
                     return True

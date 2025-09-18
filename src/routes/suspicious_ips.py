@@ -216,7 +216,7 @@ async def get_suspicious_ips(
                 params = [user_id]
 
                 # key_id가 지정되면 소유 검증 후 해당 키로 제한
-                if key_id:
+                if key_id and key_id.strip():
                     if key_id not in api_keys:
                         raise HTTPException(status_code=403, detail="Forbidden: key not owned")
                     where_conditions.append("api_keys.key_id = %s")
@@ -328,7 +328,7 @@ async def get_ip_stats(request: Request, key_id: Optional[str] = Query(None, des
                     }
                 # key_id가 지정되면 소유 검증
                 filter_key: Optional[str] = None
-                if key_id:
+                if key_id and key_id.strip():
                     if key_id not in api_keys:
                         raise HTTPException(status_code=403, detail="Forbidden: key not owned")
                     filter_key = key_id
