@@ -583,14 +583,17 @@ def get_user_hourly_chart_data(
                     # 총횟수: api_request_logs (사용자 소유 키)
                     total_sql = f"""
                         SELECT 
-                            DATE(arl.created_at) AS d,
-                            DATE_FORMAT(DATE(arl.created_at), '%%m/%%d') AS label,
-                            COUNT(*) AS total
-                        FROM api_request_logs arl
-                        JOIN api_keys ak ON arl.api_key = ak.key_id
-                        WHERE ak.user_id = %s AND {get_date_filter(period, "arl")}
-                        GROUP BY DATE(arl.created_at)
-                        ORDER BY DATE(arl.created_at)
+                            t.d AS d,
+                            DATE_FORMAT(t.d, '%%m/%%d') AS label,
+                            t.total AS total
+                        FROM (
+                            SELECT DATE(arl.created_at) AS d, COUNT(*) AS total
+                            FROM api_request_logs arl
+                            JOIN api_keys ak ON arl.api_key = ak.key_id
+                            WHERE ak.user_id = %s AND {get_date_filter(period, "arl")}
+                            GROUP BY DATE(arl.created_at)
+                        ) AS t
+                        ORDER BY t.d
                     """
                     cursor.execute(total_sql, (user_id,))
                     total_rows = {str(r['d']): {"label": r['label'], "total": int(r['total'] or 0)} for r in (cursor.fetchall() or [])}
