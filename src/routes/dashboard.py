@@ -404,11 +404,14 @@ def get_user_key_stats(
                         FROM request_logs
                         WHERE user_id = %s 
                           AND request_time >= %s
-                          AND path IN (%s, %s, %s)
+                          AND path IN (%s, %s, %s){key_clause}
                         GROUP BY DATE(request_time)
                         ORDER BY DATE(request_time) ASC
                         """
-                    cursor.execute(success_fail_sql, [current_user["id"], start_date, *verify_paths])
+                    success_fail_params = [current_user["id"], start_date, *verify_paths]
+                    if api_key:
+                        success_fail_params.append(api_key)
+                    cursor.execute(success_fail_sql, success_fail_params)
                     success_fail_rows = {r["date"]: r for r in (cursor.fetchall() or [])}
                     
                     for d in days_list:
@@ -456,11 +459,14 @@ def get_user_key_stats(
                         FROM request_logs
                         WHERE user_id = %s 
                           AND request_time >= %s
-                          AND path IN (%s, %s, %s)
+                          AND path IN (%s, %s, %s){key_clause}
                         GROUP BY YEARWEEK(request_time, 3)
                         ORDER BY yw ASC
                         """
-                    cursor.execute(success_fail_sql, [current_user["id"], start_date, *verify_paths])
+                    success_fail_params = [current_user["id"], start_date, *verify_paths]
+                    if api_key:
+                        success_fail_params.append(api_key)
+                    cursor.execute(success_fail_sql, success_fail_params)
                     success_fail_rows = {r["yw"]: r for r in (cursor.fetchall() or [])}
                     
                     for r in total_rows:
@@ -518,11 +524,14 @@ def get_user_key_stats(
                         FROM request_logs
                         WHERE user_id = %s 
                           AND request_time >= %s
-                          AND path IN (%s, %s, %s)
+                          AND path IN (%s, %s, %s){key_clause}
                         GROUP BY DATE_FORMAT(request_time, '%%Y-%%m')
                         ORDER BY ym ASC
                         """
-                    cursor.execute(success_fail_sql, [current_user["id"], start_date, *verify_paths])
+                    success_fail_params = [current_user["id"], start_date, *verify_paths]
+                    if api_key:
+                        success_fail_params.append(api_key)
+                    cursor.execute(success_fail_sql, success_fail_params)
                     success_fail_rows = {r["ym"]: r for r in (cursor.fetchall() or [])}
                     
                     for r in total_rows:
