@@ -563,21 +563,6 @@ def get_user_hourly_chart_data(
                     cursor.execute(result_sql, (user_id, *verify_paths))
                     result_rows = {int(r['hour_group']): r for r in (cursor.fetchall() or [])}
 
-                    # 리렌더링: api_request_logs 중 verify 3종이 아닌 요청 (오늘, 2시간 단위)
-                    rerender_sql = """
-                        SELECT 
-                            FLOOR(HOUR(arl.created_at) / 2) * 2 AS hour_group,
-                            COUNT(*) AS rerender_cnt
-                        FROM api_request_logs arl
-                        JOIN api_keys ak ON arl.api_key = ak.key_id
-                        WHERE ak.user_id = %s 
-                          AND DATE(arl.created_at) = CURDATE()
-                          AND arl.path NOT IN (%s, %s, %s)
-                        GROUP BY hour_group
-                        ORDER BY hour_group
-                    """
-                    cursor.execute(rerender_sql, (user_id, *verify_paths))
-                    rerender_rows = {int(r['hour_group']): int(r.get('rerender_cnt') or 0) for r in (cursor.fetchall() or [])}
 
                     chart_data = []
                     for hour in range(0, 24, 2):
@@ -585,14 +570,11 @@ def get_user_hourly_chart_data(
                         r = result_rows.get(hour, {})
                         success = int(r.get('success_cnt', 0) or 0)
                         failed = int(r.get('fail_cnt', 0) or 0)
-                        # 리렌더링: 비-verify 엔드포인트 요청 수
-                        rerender = int(rerender_rows.get(hour, 0))
                         chart_data.append({
                             "time": f"{hour:02d}시",
                             "requests": totals,
                             "success": success,
                             "failed": failed,
-                            "rerender": rerender,
                         })
 
                 else:
@@ -631,23 +613,6 @@ def get_user_hourly_chart_data(
                     cursor.execute(result_sql, (user_id, *verify_paths))
                     result_rows = {str(r['d']): r for r in (cursor.fetchall() or [])}
 
-                    # 리렌더링: api_request_logs 중 verify 3종이 아닌 요청 (일별)
-                    rerender_sql = f"""
-                        SELECT 
-                            DATE(arl.created_at) AS d,
-                            COUNT(*) AS rerender_cnt
-                        FROM api_request_logs arl
-                        JOIN api_keys ak ON arl.api_key = ak.key_id
-                        WHERE ak.user_id = %s 
-                          AND {get_date_filter(period, "arl")}
-                          AND arl.path NOT IN (%s, %s, %s)
-                        GROUP BY DATE(arl.created_at)
-                        ORDER BY DATE(arl.created_at)
-                    """
-                    cursor.execute(rerender_sql, (user_id, *verify_paths))
-                    rerender_data = cursor.fetchall() or []
-                    logger.info(f"리렌더링 데이터 조회 결과: {rerender_data}")
-                    rerender_rows = {str(r['d']): int(r.get('rerender_cnt') or 0) for r in rerender_data}
 
                     # 병합 (총횟수 기준 날짜만 사용)
                     chart_data = []
@@ -655,15 +620,11 @@ def get_user_hourly_chart_data(
                         r = result_rows.get(d, {})
                         success = int(r.get('success_cnt', 0) or 0)
                         failed = int(r.get('fail_cnt', 0) or 0)
-                        # 리렌더링: 비-verify 엔드포인트 요청 수
-                        rerender = int(rerender_rows.get(d, 0))
-                        logger.info(f"날짜 {d}: 총={int(meta['total'] or 0)}, 성공={success}, 실패={failed}, 리렌더링={rerender}")
                         chart_data.append({
                             "time": meta['label'],
                             "requests": int(meta['total'] or 0),
                             "success": success,
                             "failed": failed,
-                            "rerender": rerender,
                         })
                 
                 return {
