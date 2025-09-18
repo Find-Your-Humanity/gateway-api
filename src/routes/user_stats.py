@@ -554,35 +554,6 @@ def get_user_hourly_chart_data(
                         "failed": int(result['failed'] or 0)
                     }]
 
-                    # 성공/실패: request_logs (verify 3종, status_code 200/400/500, 오늘, 2시간 단위)
-                    result_sql = """
-                        SELECT 
-                            FLOOR(HOUR(rl.request_time) / 2) * 2 AS hour_group,
-                            SUM(CASE WHEN rl.status_code = 200 THEN 1 ELSE 0 END) AS success_cnt,
-                            SUM(CASE WHEN rl.status_code IN (400,500) THEN 1 ELSE 0 END) AS fail_cnt
-                        FROM request_logs rl
-                        WHERE rl.user_id = %s
-                          AND rl.path IN (%s, %s, %s)
-                          AND DATE(rl.request_time) = CURDATE()
-                        GROUP BY hour_group
-                        ORDER BY hour_group
-                    """
-                    cursor.execute(result_sql, (user_id, *verify_paths))
-                    result_rows = {int(r['hour_group']): r for r in (cursor.fetchall() or [])}
-
-
-                    chart_data = []
-                    for hour in range(0, 24, 2):
-                        totals = int(total_rows.get(hour, 0))
-                        r = result_rows.get(hour, {})
-                        success = int(r.get('success_cnt', 0) or 0)
-                        failed = int(r.get('fail_cnt', 0) or 0)
-                        chart_data.append({
-                            "time": f"{hour:02d}시",
-                            "requests": totals,
-                            "success": success,
-                            "failed": failed,
-                        })
 
                 elif period == "week":
                     # 일주일: 일별 집계 (daily_user_api_stats 사용)
