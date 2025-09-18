@@ -347,7 +347,9 @@ def get_user_key_stats(
     current_user = Depends(require_auth),
 ):
     """로그인 사용자의 API 키/타입별 사용량 (누락 구간 0 채움)
-    - 데이터 소스: daily_user_api_stats
+    - 총 요청: api_request_logs (api_type별)
+    - 성공/실패: request_logs (verify 엔드포인트별)
+    - 리렌더링: 총 - 성공 - 실패
     - api_key 미지정 시: 사용자의 모든 키 합계
     - api_type=all: 타입 합계, 그 외: 지정 타입만
     """
@@ -360,50 +362,110 @@ def get_user_key_stats(
                 kst = timezone(timedelta(hours=9))
                 today = datetime.now(kst).date()
 
-                # 조건 구성
-                params: list = [current_user["id"]]
-                type_clause = ""
-                if api_type != "all":
-                    type_clause = " AND api_type = %s"
-                    params.append(api_type)
-                key_clause = ""
+                # API 키 필터 조건
+                api_key_filter = ""
+                api_key_params = []
                 if api_key:
-                    key_clause = " AND api_key = %s"
-                    params.append(api_key)
+                    api_key_filter = "AND arl.api_key = %s"
+                    api_key_params = [api_key]
+
+                # API 타입 필터 조건
+                api_type_filter = ""
+                api_type_params = []
+                if api_type != "all":
+                    api_type_filter = "AND arl.api_type = %s"
+                    api_type_params = [api_type]
+
+                # verify 엔드포인트 경로
+                verify_paths = ['/api/imagecaptcha-verify', '/api/abstract-verify', '/api/handwriting-verify']
 
                 if period == "daily":
                     # 최근 N일 데이터 (기본 7일, 최대 365일)
                     safe_days = max(1, min(int(days), 365))
                     start_date = today - timedelta(days=safe_days - 1)
-                    # 0 채움용 라벨 테이블 생성
                     days_list = [today - timedelta(days=i) for i in range(safe_days - 1, -1, -1)]
-                    # 파라미터 순서: user_id, start_date, (api_type?), (api_key?)
-                    base_sql = f"""
-                        SELECT date, 
-                               SUM(total_requests) AS total,
-                               SUM(successful_requests) AS success,
-                               SUM(failed_requests) AS failed
-                        FROM daily_user_api_stats
-                        WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
-                        GROUP BY date
-                        ORDER BY date ASC
-                        """
-                    # 올바른 파라미터 바인딩
-                    bind_params = [current_user["id"], start_date]
-                    if api_type != "all":
-                        bind_params.append(api_type)
-                    if api_key:
-                        bind_params.append(api_key)
-                    cursor.execute(base_sql, bind_params)
-                    rows = {r["date"]: r for r in (cursor.fetchall() or [])}
+
+                    # 총 요청: api_request_logs에서 api_type별 집계
+                    total_sql = f"""
+                        SELECT 
+                            DATE(arl.created_at) AS d,
+                            arl.api_type,
+                            COUNT(*) AS total
+                        FROM api_request_logs arl
+                        JOIN api_keys ak ON arl.api_key = ak.key_id
+                        WHERE ak.user_id = %s 
+                          AND DATE(arl.created_at) >= %s
+                          {api_key_filter}
+                          {api_type_filter}
+                        GROUP BY DATE(arl.created_at), arl.api_type
+                        ORDER BY d, arl.api_type
+                    """
+                    total_params = [current_user["id"], start_date] + api_key_params + api_type_params
+                    cursor.execute(total_sql, total_params)
+                    total_rows = cursor.fetchall() or []
+
+                    # 성공/실패: request_logs에서 verify 엔드포인트별 집계
+                    result_sql = f"""
+                        SELECT 
+                            DATE(rl.request_time) AS d,
+                            CASE
+                                WHEN rl.path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                                WHEN rl.path = '/api/abstract-verify' THEN 'abstract'
+                                WHEN rl.path = '/api/handwriting-verify' THEN 'handwriting'
+                                ELSE 'unknown'
+                            END AS api_type,
+                            SUM(CASE WHEN rl.status_code = 200 THEN 1 ELSE 0 END) AS success,
+                            SUM(CASE WHEN rl.status_code IN (400,500) THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs rl
+                        WHERE rl.user_id = %s 
+                          AND DATE(rl.request_time) >= %s
+                          AND rl.path IN (%s, %s, %s)
+                          {api_key_filter.replace('arl.api_key', 'rl.api_key')}
+                        GROUP BY DATE(rl.request_time), api_type
+                        ORDER BY d, api_type
+                    """
+                    result_params = [current_user["id"], start_date] + verify_paths + api_key_params
+                    cursor.execute(result_sql, result_params)
+                    result_rows = cursor.fetchall() or []
+
+                    # 데이터 병합
+                    total_data = {}
+                    for row in total_rows:
+                        d = str(row['d'])
+                        api_type = row['api_type']
+                        if d not in total_data:
+                            total_data[d] = {}
+                        total_data[d][api_type] = int(row['total'] or 0)
+
+                    result_data = {}
+                    for row in result_rows:
+                        d = str(row['d'])
+                        api_type = row['api_type']
+                        if d not in result_data:
+                            result_data[d] = {}
+                        result_data[d][api_type] = {
+                            'success': int(row['success'] or 0),
+                            'failed': int(row['failed'] or 0)
+                        }
+
+                    # 결과 생성
                     for d in days_list:
-                        r = rows.get(d)
-                        if r:
-                            total = int(r.get("total", 0))
-                            success = int(r.get("success", 0))
-                            failed = int(r.get("failed", 0))
+                        d_str = d.strftime("%Y-%m-%d")
+                        day_totals = total_data.get(d_str, {})
+                        day_results = result_data.get(d_str, {})
+
+                        if api_type == "all":
+                            # 전체 합계
+                            total = sum(day_totals.values())
+                            success = sum(r.get('success', 0) for r in day_results.values())
+                            failed = sum(r.get('failed', 0) for r in day_results.values())
                         else:
-                            total = success = failed = 0
+                            # 특정 타입만
+                            total = day_totals.get(api_type, 0)
+                            result = day_results.get(api_type, {})
+                            success = result.get('success', 0)
+                            failed = result.get('failed', 0)
+
                         rate = round((success / total) * 100, 1) if total else 0.0
                         results.append({
                             "totalRequests": total,
@@ -411,44 +473,98 @@ def get_user_key_stats(
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
-                            "date": d.strftime("%Y-%m-%d"),
+                            "date": d_str,
                         })
 
                 elif period == "weekly":
                     start_date = today - timedelta(days=28)
-                    base_sql = f"""
-                        SELECT YEARWEEK(date, 3) AS yw,
-                               MIN(date) AS week_start,
-                               SUM(total_requests) AS total,
-                               SUM(successful_requests) AS success,
-                               SUM(failed_requests) AS failed
-                        FROM daily_user_api_stats
-                        WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
-                        GROUP BY YEARWEEK(date, 3)
-                        ORDER BY yw ASC
-                        """
-                    bind_params = [current_user["id"], start_date]
-                    if api_type != "all":
-                        bind_params.append(api_type)
-                    if api_key:
-                        bind_params.append(api_key)
-                    cursor.execute(base_sql, bind_params)
-                    rows = cursor.fetchall() or []
-                    for r in rows:
-                        total = int(r.get("total", 0))
-                        success = int(r.get("success", 0))
-                        failed = int(r.get("failed", 0))
+                    
+                    # 총 요청: api_request_logs에서 주별 집계
+                    total_sql = f"""
+                        SELECT 
+                            YEARWEEK(arl.created_at, 3) AS yw,
+                            MIN(DATE(arl.created_at)) AS week_start,
+                            arl.api_type,
+                            COUNT(*) AS total
+                        FROM api_request_logs arl
+                        JOIN api_keys ak ON arl.api_key = ak.key_id
+                        WHERE ak.user_id = %s 
+                          AND DATE(arl.created_at) >= %s
+                          {api_key_filter}
+                          {api_type_filter}
+                        GROUP BY YEARWEEK(arl.created_at, 3), arl.api_type
+                        ORDER BY yw, arl.api_type
+                    """
+                    total_params = [current_user["id"], start_date] + api_key_params + api_type_params
+                    cursor.execute(total_sql, total_params)
+                    total_rows = cursor.fetchall() or []
+
+                    # 성공/실패: request_logs에서 주별 집계
+                    result_sql = f"""
+                        SELECT 
+                            YEARWEEK(rl.request_time, 3) AS yw,
+                            MIN(DATE(rl.request_time)) AS week_start,
+                            CASE
+                                WHEN rl.path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                                WHEN rl.path = '/api/abstract-verify' THEN 'abstract'
+                                WHEN rl.path = '/api/handwriting-verify' THEN 'handwriting'
+                                ELSE 'unknown'
+                            END AS api_type,
+                            SUM(CASE WHEN rl.status_code = 200 THEN 1 ELSE 0 END) AS success,
+                            SUM(CASE WHEN rl.status_code IN (400,500) THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs rl
+                        WHERE rl.user_id = %s 
+                          AND DATE(rl.request_time) >= %s
+                          AND rl.path IN (%s, %s, %s)
+                          {api_key_filter.replace('arl.api_key', 'rl.api_key')}
+                        GROUP BY YEARWEEK(rl.request_time, 3), api_type
+                        ORDER BY yw, api_type
+                    """
+                    result_params = [current_user["id"], start_date] + verify_paths + api_key_params
+                    cursor.execute(result_sql, result_params)
+                    result_rows = cursor.fetchall() or []
+
+                    # 데이터 병합 및 결과 생성
+                    total_data = {}
+                    for row in total_rows:
+                        yw = row['yw']
+                        api_type = row['api_type']
+                        if yw not in total_data:
+                            total_data[yw] = {'week_start': row['week_start']}
+                        total_data[yw][api_type] = int(row['total'] or 0)
+
+                    result_data = {}
+                    for row in result_rows:
+                        yw = row['yw']
+                        api_type = row['api_type']
+                        if yw not in result_data:
+                            result_data[yw] = {}
+                        result_data[yw][api_type] = {
+                            'success': int(row['success'] or 0),
+                            'failed': int(row['failed'] or 0)
+                        }
+
+                    for yw, data in total_data.items():
+                        week_start = data['week_start']
+                        month = week_start.month
+                        day = week_start.day
+                        week_in_month = ((day - 1) // 7) + 1
+                        label = f"{month}월 {week_in_month}주차"
+
+                        day_totals = {k: v for k, v in data.items() if k != 'week_start'}
+                        day_results = result_data.get(yw, {})
+
+                        if api_type == "all":
+                            total = sum(day_totals.values())
+                            success = sum(r.get('success', 0) for r in day_results.values())
+                            failed = sum(r.get('failed', 0) for r in day_results.values())
+                        else:
+                            total = day_totals.get(api_type, 0)
+                            result = day_results.get(api_type, {})
+                            success = result.get('success', 0)
+                            failed = result.get('failed', 0)
+
                         rate = round((success / total) * 100, 1) if total else 0.0
-                        # 라벨을 "M월 N주차"로 변환 (주간의 시작일 기준)
-                        try:
-                            ws = r["week_start"]
-                            # week_start는 date 객체로 들어옴
-                            month = ws.month
-                            day = ws.day
-                            week_in_month = ( (day - 1) // 7 ) + 1
-                            label = f"{month}월 {week_in_month}주차"
-                        except Exception:
-                            label = f"W{r['yw']}"
                         results.append({
                             "totalRequests": total,
                             "successfulSolves": success,
@@ -460,27 +576,83 @@ def get_user_key_stats(
 
                 else:  # monthly
                     start_date = today - timedelta(days=365)
-                    base_sql = f"""
-                        SELECT DATE_FORMAT(date, '%%Y-%%m') AS ym,
-                               SUM(total_requests) AS total,
-                               SUM(successful_requests) AS success,
-                               SUM(failed_requests) AS failed
-                        FROM daily_user_api_stats
-                        WHERE user_id = %s AND date >= %s{type_clause}{key_clause}
-                        GROUP BY DATE_FORMAT(date, '%%Y-%%m')
-                        ORDER BY ym ASC
-                        """
-                    bind_params = [current_user["id"], start_date]
-                    if api_type != "all":
-                        bind_params.append(api_type)
-                    if api_key:
-                        bind_params.append(api_key)
-                    cursor.execute(base_sql, bind_params)
-                    rows = cursor.fetchall() or []
-                    for r in rows:
-                        total = int(r.get("total", 0))
-                        success = int(r.get("success", 0))
-                        failed = int(r.get("failed", 0))
+                    
+                    # 총 요청: api_request_logs에서 월별 집계
+                    total_sql = f"""
+                        SELECT 
+                            DATE_FORMAT(arl.created_at, '%%Y-%%m') AS ym,
+                            arl.api_type,
+                            COUNT(*) AS total
+                        FROM api_request_logs arl
+                        JOIN api_keys ak ON arl.api_key = ak.key_id
+                        WHERE ak.user_id = %s 
+                          AND DATE(arl.created_at) >= %s
+                          {api_key_filter}
+                          {api_type_filter}
+                        GROUP BY DATE_FORMAT(arl.created_at, '%%Y-%%m'), arl.api_type
+                        ORDER BY ym, arl.api_type
+                    """
+                    total_params = [current_user["id"], start_date] + api_key_params + api_type_params
+                    cursor.execute(total_sql, total_params)
+                    total_rows = cursor.fetchall() or []
+
+                    # 성공/실패: request_logs에서 월별 집계
+                    result_sql = f"""
+                        SELECT 
+                            DATE_FORMAT(rl.request_time, '%%Y-%%m') AS ym,
+                            CASE
+                                WHEN rl.path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                                WHEN rl.path = '/api/abstract-verify' THEN 'abstract'
+                                WHEN rl.path = '/api/handwriting-verify' THEN 'handwriting'
+                                ELSE 'unknown'
+                            END AS api_type,
+                            SUM(CASE WHEN rl.status_code = 200 THEN 1 ELSE 0 END) AS success,
+                            SUM(CASE WHEN rl.status_code IN (400,500) THEN 1 ELSE 0 END) AS failed
+                        FROM request_logs rl
+                        WHERE rl.user_id = %s 
+                          AND DATE(rl.request_time) >= %s
+                          AND rl.path IN (%s, %s, %s)
+                          {api_key_filter.replace('arl.api_key', 'rl.api_key')}
+                        GROUP BY DATE_FORMAT(rl.request_time, '%%Y-%%m'), api_type
+                        ORDER BY ym, api_type
+                    """
+                    result_params = [current_user["id"], start_date] + verify_paths + api_key_params
+                    cursor.execute(result_sql, result_params)
+                    result_rows = cursor.fetchall() or []
+
+                    # 데이터 병합 및 결과 생성
+                    total_data = {}
+                    for row in total_rows:
+                        ym = row['ym']
+                        api_type = row['api_type']
+                        if ym not in total_data:
+                            total_data[ym] = {}
+                        total_data[ym][api_type] = int(row['total'] or 0)
+
+                    result_data = {}
+                    for row in result_rows:
+                        ym = row['ym']
+                        api_type = row['api_type']
+                        if ym not in result_data:
+                            result_data[ym] = {}
+                        result_data[ym][api_type] = {
+                            'success': int(row['success'] or 0),
+                            'failed': int(row['failed'] or 0)
+                        }
+
+                    for ym, day_totals in total_data.items():
+                        day_results = result_data.get(ym, {})
+
+                        if api_type == "all":
+                            total = sum(day_totals.values())
+                            success = sum(r.get('success', 0) for r in day_results.values())
+                            failed = sum(r.get('failed', 0) for r in day_results.values())
+                        else:
+                            total = day_totals.get(api_type, 0)
+                            result = day_results.get(api_type, {})
+                            success = result.get('success', 0)
+                            failed = result.get('failed', 0)
+
                         rate = round((success / total) * 100, 1) if total else 0.0
                         results.append({
                             "totalRequests": total,
@@ -488,7 +660,7 @@ def get_user_key_stats(
                             "failedAttempts": failed,
                             "successRate": rate,
                             "averageResponseTime": 0,
-                            "date": r['ym'],
+                            "date": ym,
                         })
 
                 return {
