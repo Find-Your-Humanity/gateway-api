@@ -145,24 +145,29 @@ def get_user_stats_overview(
                 peak_daily_requests = int(peak_result['daily_total'] or 0) if peak_result else 0
                 peak_date = peak_result['peak_date'] if peak_result else None
                 
-                # 캡차 타입별 성공률을 request_logs 기반으로 재계산 (세 verify 경로만)
+                # 캡차 타입별 성공률을 request_logs 기반으로 재계산 (세 verify 엔드포인트 각각)
                 logs_type_ratio_query = f"""
                     SELECT 
-                        api_type AS captcha_type,
+                        path,
                         SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
                         COUNT(*) AS total_requests
                     FROM request_logs
                     WHERE user_id = %s
-                      AND api_type IN ('imagecaptcha','abstract','handwriting')
+                      AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
                       AND {get_date_filter(period, "request_logs")}
-                      AND path LIKE %s
-                    GROUP BY api_type
+                    GROUP BY path
                 """
-                cursor.execute(logs_type_ratio_query, (user_id, "%verify%"))
+                cursor.execute(logs_type_ratio_query, (user_id,))
                 rows = cursor.fetchall() or []
                 type_to_ratio: Dict[str, Dict[str, int]] = {}
+                path_to_type = {
+                    '/api/imagecaptcha-verify': 'imagecaptcha',
+                    '/api/abstract-verify': 'abstract',
+                    '/api/handwriting-verify': 'handwriting',
+                }
                 for r in rows:
-                    ct = r.get('captcha_type')
+                    p = r.get('path')
+                    ct = path_to_type.get(p)
                     if ct:
                         type_to_ratio[ct] = {
                             'success': int(r.get('success_requests') or 0),
@@ -189,18 +194,16 @@ def get_user_stats_overview(
                     })
 
                 # 4. 성공률만 request_logs 기반으로 재계산 (세 verify 엔드포인트만)
-                # 성공률(전체) 재계산: request_logs의 api_type 기반, verify 계열만 포함(path LIKE '%verify%')
                 success_ratio_query = f"""
                     SELECT 
                         SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
                         COUNT(*) AS total_requests
                     FROM request_logs
                     WHERE user_id = %s
-                      AND api_type IN ('handwriting','abstract','imagecaptcha')
+                      AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
                       AND {get_date_filter(period, "request_logs")}
-                      AND path LIKE %s
                 """
-                cursor.execute(success_ratio_query, (user_id, "%verify%"))
+                cursor.execute(success_ratio_query, (user_id,))
                 ratio_row = cursor.fetchone() or {"success_requests": 0, "total_requests": 0}
                 success_rate = (ratio_row["success_requests"] / ratio_row["total_requests"] * 100) if ratio_row["total_requests"] > 0 else 0
                 
@@ -325,11 +328,10 @@ def get_user_stats_by_api_key(
                             COUNT(*) AS total_requests
                         FROM request_logs
                         WHERE user_id = %s AND api_key = %s
-                          AND api_type IN ('imagecaptcha','abstract','handwriting')
+                          AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
                           AND {get_date_filter(period, "request_logs")}
-                          AND path LIKE %s
                     """
-                    cursor.execute(key_success_ratio_query, (user_id, key_id, "%verify%"))
+                    cursor.execute(key_success_ratio_query, (user_id, key_id))
                     key_ratio = cursor.fetchone() or {"success_requests": 0, "total_requests": 0}
                     if (key_ratio.get("total_requests") or 0) > 0:
                         success_rate = (key_ratio["success_requests"] / key_ratio["total_requests"] * 100)
@@ -340,21 +342,26 @@ def get_user_stats_by_api_key(
                     # 먼저 로그에서 키+타입별 성공/총합 집계
                     key_logs_type_ratio_query = f"""
                         SELECT 
-                            api_type AS captcha_type,
+                            path,
                             SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
                             COUNT(*) AS total_requests
                         FROM request_logs
                         WHERE user_id = %s AND api_key = %s
-                          AND api_type IN ('imagecaptcha','abstract','handwriting')
+                          AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
                           AND {get_date_filter(period, "request_logs")}
-                          AND path LIKE %s
-                        GROUP BY api_type
+                        GROUP BY path
                     """
-                    cursor.execute(key_logs_type_ratio_query, (user_id, key_id, "%verify%"))
+                    cursor.execute(key_logs_type_ratio_query, (user_id, key_id))
                     key_type_rows = cursor.fetchall() or []
                     type_ratio_map: Dict[str, Dict[str, int]] = {}
+                    path_to_type = {
+                        '/api/imagecaptcha-verify': 'imagecaptcha',
+                        '/api/abstract-verify': 'abstract',
+                        '/api/handwriting-verify': 'handwriting',
+                    }
                     for r in key_type_rows:
-                        ct = r.get('captcha_type')
+                        p = r.get('path')
+                        ct = path_to_type.get(p)
                         if ct:
                             type_ratio_map[ct] = {
                                 'success': int(r.get('success_requests') or 0),
