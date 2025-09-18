@@ -18,6 +18,27 @@ def _row_to_user(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _as_int_bool(value: Any) -> Optional[int]:
+    # None은 그대로 유지
+    if value is None:
+        return None
+    # 이미 정수 0/1이면 그대로
+    if isinstance(value, int):
+        return 1 if value != 0 else 0
+    # 불리언 처리
+    if isinstance(value, bool):
+        return 1 if value else 0
+    # 문자열 처리: '1','true','True','yes','on' => 1, '0','false','no','off' => 0
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("1", "true", "yes", "on"):  # 활성
+            return 1
+        if v in ("0", "false", "no", "off"):  # 비활성
+            return 0
+    # 기타 타입은 파이썬 truthy로 변환
+    return 1 if value else 0
+
+
 @router.get("/api/admin/users")
 def list_users(
     page: int = Query(1, ge=1),
@@ -79,8 +100,11 @@ def update_user(
     values: List[Any] = []
     for f in allowed_fields:
         if f in payload and payload[f] is not None:
+            val = payload[f]
+            if f in ("is_active", "is_admin"):
+                val = _as_int_bool(val)
             sets.append(f"{f} = %s")
-            values.append(payload[f])
+            values.append(val)
 
     if not sets:
         return {"success": True, "data": None}
@@ -124,5 +148,47 @@ def delete_user(user_id: int = Path(..., ge=1)):
         if "foreign key" in msg.lower() or "constraint" in msg.lower():
             raise HTTPException(status_code=409, detail="Cannot delete user due to related records")
         raise HTTPException(status_code=500, detail=msg)
+
+
+@router.patch("/api/admin/users/{user_id}/active")
+def toggle_user_active(
+    user_id: int = Path(..., ge=1),
+    payload: Optional[Dict[str, Any]] = None,
+):
+    # payload에 is_active가 오면 해당 값으로 설정, 없으면 토글
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(dictionary=True) as cursor:
+                # 현재 값 조회
+                cursor.execute(
+                    "SELECT is_active FROM users WHERE id = %s",
+                    (user_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="User not found")
+
+                current_active = bool(row.get("is_active"))
+                if payload and "is_active" in payload and payload["is_active"] is not None:
+                    new_active_int = _as_int_bool(payload["is_active"])
+                else:
+                    new_active_int = 0 if current_active else 1
+
+                cursor.execute(
+                    "UPDATE users SET is_active = %s WHERE id = %s",
+                    (new_active_int, user_id),
+                )
+                conn.commit()
+
+                cursor.execute(
+                    "SELECT id, email, username, name, contact, is_active, is_admin, created_at FROM users WHERE id = %s",
+                    (user_id,),
+                )
+                updated = cursor.fetchone()
+                return {"success": True, "data": _row_to_user(updated)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
