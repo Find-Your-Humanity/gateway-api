@@ -513,7 +513,8 @@ def get_user_stats_time_series(
 def get_user_hourly_chart_data(
     request: Request,
     period: str = Query("today", description="통계 기간: today, week, month"),
-    api_type: str = Query("all", description="API 타입: all, handwriting, abstract, imagecaptcha")
+    api_type: str = Query("all", description="API 타입: all, handwriting, abstract, imagecaptcha"),
+    api_key: str = Query(None, description="특정 API 키 ID")
 ):
     """시간별/일별 차트 데이터 조회"""
     try:
@@ -532,6 +533,13 @@ def get_user_hourly_chart_data(
             api_type_filter = "AND api_type = %s"
             api_type_params = [api_type]
         
+        # API 키 필터 조건
+        api_key_filter = ""
+        api_key_params = []
+        if api_key:
+            api_key_filter = "AND api_key = %s"
+            api_key_params = [api_key]
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 if period == "today":
@@ -542,9 +550,9 @@ def get_user_hourly_chart_data(
                             COALESCE(SUM(successful_requests), 0) as success,
                             COALESCE(SUM(failed_requests), 0) as failed
                         FROM daily_user_api_stats
-                        WHERE user_id = %s AND date = CURDATE() {api_type_filter}
+                        WHERE user_id = %s AND date = CURDATE() {api_type_filter} {api_key_filter}
                     """
-                    cursor.execute(total_sql, [user_id] + api_type_params)
+                    cursor.execute(total_sql, [user_id] + api_type_params + api_key_params)
                     result = cursor.fetchone()
                     
                     chart_data = [{
@@ -565,11 +573,11 @@ def get_user_hourly_chart_data(
                             COALESCE(SUM(successful_requests), 0) as success,
                             COALESCE(SUM(failed_requests), 0) as failed
                         FROM daily_user_api_stats
-                        WHERE user_id = %s AND {get_date_filter(period, "daily_user_api_stats")} {api_type_filter}
+                        WHERE user_id = %s AND {get_date_filter(period, "daily_user_api_stats")} {api_type_filter} {api_key_filter}
                         GROUP BY date
                         ORDER BY date
                     """
-                    cursor.execute(total_sql, [user_id] + api_type_params)
+                    cursor.execute(total_sql, [user_id] + api_type_params + api_key_params)
                     rows = cursor.fetchall() or []
                     
                     chart_data = []
@@ -591,11 +599,11 @@ def get_user_hourly_chart_data(
                             COALESCE(SUM(successful_requests), 0) as success,
                             COALESCE(SUM(failed_requests), 0) as failed
                         FROM daily_user_api_stats
-                        WHERE user_id = %s AND {get_date_filter(period, "daily_user_api_stats")} {api_type_filter}
+                        WHERE user_id = %s AND {get_date_filter(period, "daily_user_api_stats")} {api_type_filter} {api_key_filter}
                         GROUP BY YEARWEEK(date, 3)
                         ORDER BY yw
                     """
-                    cursor.execute(total_sql, [user_id] + api_type_params)
+                    cursor.execute(total_sql, [user_id] + api_type_params + api_key_params)
                     rows = cursor.fetchall() or []
                     
                     chart_data = []
