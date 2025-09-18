@@ -148,18 +148,15 @@ def get_user_stats_overview(
                 # 캡차 타입별 성공률을 request_logs 기반으로 재계산 (세 verify 경로만)
                 logs_type_ratio_query = f"""
                     SELECT 
-                        CASE 
-                          WHEN path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
-                          WHEN path = '/api/abstract-verify' THEN 'abstract'
-                          WHEN path = '/api/handwriting-verify' THEN 'handwriting'
-                        END AS captcha_type,
+                        api_type AS captcha_type,
                         SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
                         COUNT(*) AS total_requests
                     FROM request_logs
                     WHERE user_id = %s
-                      AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                      AND api_type IN ('imagecaptcha','abstract','handwriting')
                       AND {get_date_filter(period, "request_logs")}
-                    GROUP BY captcha_type
+                      AND (path LIKE '%verify%')
+                    GROUP BY api_type
                 """
                 cursor.execute(logs_type_ratio_query, (user_id,))
                 rows = cursor.fetchall() or []
@@ -192,14 +189,16 @@ def get_user_stats_overview(
                     })
 
                 # 4. 성공률만 request_logs 기반으로 재계산 (세 verify 엔드포인트만)
+                # 성공률(전체) 재계산: request_logs의 api_type 기반, verify 계열만 포함(path LIKE '%verify%')
                 success_ratio_query = f"""
                     SELECT 
                         SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
                         COUNT(*) AS total_requests
                     FROM request_logs
                     WHERE user_id = %s
-                      AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                      AND api_type IN ('handwriting','abstract','imagecaptcha')
                       AND {get_date_filter(period, "request_logs")}
+                      AND (path LIKE '%verify%')
                 """
                 cursor.execute(success_ratio_query, (user_id,))
                 ratio_row = cursor.fetchone() or {"success_requests": 0, "total_requests": 0}
@@ -326,8 +325,9 @@ def get_user_stats_by_api_key(
                             COUNT(*) AS total_requests
                         FROM request_logs
                         WHERE user_id = %s AND api_key = %s
-                          AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                          AND api_type IN ('imagecaptcha','abstract','handwriting')
                           AND {get_date_filter(period, "request_logs")}
+                          AND (path LIKE '%verify%')
                     """
                     cursor.execute(key_success_ratio_query, (user_id, key_id))
                     key_ratio = cursor.fetchone() or {"success_requests": 0, "total_requests": 0}
@@ -340,18 +340,15 @@ def get_user_stats_by_api_key(
                     # 먼저 로그에서 키+타입별 성공/총합 집계
                     key_logs_type_ratio_query = f"""
                         SELECT 
-                            CASE 
-                              WHEN path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
-                              WHEN path = '/api/abstract-verify' THEN 'abstract'
-                              WHEN path = '/api/handwriting-verify' THEN 'handwriting'
-                            END AS captcha_type,
+                            api_type AS captcha_type,
                             SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
                             COUNT(*) AS total_requests
                         FROM request_logs
                         WHERE user_id = %s AND api_key = %s
-                          AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                          AND api_type IN ('imagecaptcha','abstract','handwriting')
                           AND {get_date_filter(period, "request_logs")}
-                        GROUP BY captcha_type
+                          AND (path LIKE '%verify%')
+                        GROUP BY api_type
                     """
                     cursor.execute(key_logs_type_ratio_query, (user_id, key_id))
                     key_type_rows = cursor.fetchall() or []
