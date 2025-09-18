@@ -512,7 +512,8 @@ def get_user_stats_time_series(
 @router.get("/user/stats/hourly-chart")
 def get_user_hourly_chart_data(
     request: Request,
-    period: str = Query("today", description="통계 기간: today, week, month")
+    period: str = Query("today", description="통계 기간: today, week, month"),
+    api_type: str = Query("all", description="API 타입: all, handwriting, abstract, imagecaptcha")
 ):
     """시간별/일별 차트 데이터 조회"""
     try:
@@ -522,30 +523,36 @@ def get_user_hourly_chart_data(
             raise HTTPException(status_code=401, detail="인증이 필요합니다")
         
         user_id = current_user.get("id")
-        logger.info(f"시간별 차트 데이터 조회 시작: 사용자 {user_id}, 기간 {period}")
+        logger.info(f"시간별 차트 데이터 조회 시작: 사용자 {user_id}, 기간 {period}, API 타입 {api_type}")
+        
+        # API 타입 필터 조건
+        api_type_filter = ""
+        api_type_params = []
+        if api_type != "all":
+            api_type_filter = "AND api_type = %s"
+            api_type_params = [api_type]
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                verify_paths = (
-                    '/api/imagecaptcha-verify',
-                    '/api/abstract-verify',
-                    '/api/handwriting-verify',
-                )
-
                 if period == "today":
-                    # 총횟수: api_request_logs (사용자 소유 키, 오늘, 2시간 단위)
-                    total_sql = """
+                    # 오늘 하루 전체 데이터 (daily_user_api_stats 사용)
+                    total_sql = f"""
                         SELECT 
-                            FLOOR(HOUR(arl.created_at) / 2) * 2 AS hour_group,
-                            COUNT(*) AS total
-                        FROM api_request_logs arl
-                        JOIN api_keys ak ON arl.api_key = ak.key_id
-                        WHERE ak.user_id = %s AND DATE(arl.created_at) = CURDATE()
-                        GROUP BY hour_group
-                        ORDER BY hour_group
+                            COALESCE(SUM(total_requests), 0) as total,
+                            COALESCE(SUM(successful_requests), 0) as success,
+                            COALESCE(SUM(failed_requests), 0) as failed
+                        FROM daily_user_api_stats
+                        WHERE user_id = %s AND date = CURDATE() {api_type_filter}
                     """
-                    cursor.execute(total_sql, (user_id,))
-                    total_rows = {int(r['hour_group']): int(r['total'] or 0) for r in (cursor.fetchall() or [])}
+                    cursor.execute(total_sql, [user_id] + api_type_params)
+                    result = cursor.fetchone()
+                    
+                    chart_data = [{
+                        "label": "오늘",
+                        "requests": int(result['total'] or 0),
+                        "success": int(result['success'] or 0),
+                        "failed": int(result['failed'] or 0)
+                    }]
 
                     # 성공/실패: request_logs (verify 3종, status_code 200/400/500, 오늘, 2시간 단위)
                     result_sql = """
@@ -577,55 +584,64 @@ def get_user_hourly_chart_data(
                             "failed": failed,
                         })
 
-                else:
-                    # 주/월 단위: 일별 집계
-                    # 총횟수: api_request_logs (사용자 소유 키)
+                elif period == "week":
+                    # 일주일: 일별 집계 (daily_user_api_stats 사용)
                     total_sql = f"""
                         SELECT 
-                            t.d AS d,
-                            DATE_FORMAT(t.d, '%%m/%%d') AS label,
-                            t.total AS total
-                        FROM (
-                            SELECT DATE(arl.created_at) AS d, COUNT(*) AS total
-                            FROM api_request_logs arl
-                            JOIN api_keys ak ON arl.api_key = ak.key_id
-                            WHERE ak.user_id = %s AND {get_date_filter(period, "arl")}
-                            GROUP BY DATE(arl.created_at)
-                        ) AS t
-                        ORDER BY t.d
+                            date,
+                            DATE_FORMAT(date, '%%m/%%d') AS label,
+                            COALESCE(SUM(total_requests), 0) as total,
+                            COALESCE(SUM(successful_requests), 0) as success,
+                            COALESCE(SUM(failed_requests), 0) as failed
+                        FROM daily_user_api_stats
+                        WHERE user_id = %s AND {get_date_filter(period, "daily_user_api_stats")} {api_type_filter}
+                        GROUP BY date
+                        ORDER BY date
                     """
-                    cursor.execute(total_sql, (user_id,))
-                    total_rows = {str(r['d']): {"label": r['label'], "total": int(r['total'] or 0)} for r in (cursor.fetchall() or [])}
-
-                    # 성공/실패: request_logs (verify 3종, status 200/400/500)
-                    result_sql = f"""
-                        SELECT 
-                            DATE(rl.request_time) AS d,
-                            SUM(CASE WHEN rl.status_code = 200 THEN 1 ELSE 0 END) AS success_cnt,
-                            SUM(CASE WHEN rl.status_code IN (400,500) THEN 1 ELSE 0 END) AS fail_cnt
-                        FROM request_logs rl
-                        WHERE rl.user_id = %s
-                          AND rl.path IN (%s, %s, %s)
-                          AND {get_date_filter(period, "rl")}
-                        GROUP BY DATE(rl.request_time)
-                        ORDER BY DATE(rl.request_time)
-                    """
-                    cursor.execute(result_sql, (user_id, *verify_paths))
-                    result_rows = {str(r['d']): r for r in (cursor.fetchall() or [])}
-
-
-                    # 병합 (총횟수 기준 날짜만 사용)
+                    cursor.execute(total_sql, [user_id] + api_type_params)
+                    rows = cursor.fetchall() or []
+                    
                     chart_data = []
-                    for d, meta in total_rows.items():
-                        r = result_rows.get(d, {})
-                        success = int(r.get('success_cnt', 0) or 0)
-                        failed = int(r.get('fail_cnt', 0) or 0)
+                    for row in rows:
                         chart_data.append({
-                            "time": meta['label'],
-                            "requests": int(meta['total'] or 0),
-                            "success": success,
-                            "failed": failed,
+                            "label": row['label'],
+                            "requests": int(row['total'] or 0),
+                            "success": int(row['success'] or 0),
+                            "failed": int(row['failed'] or 0)
                         })
+                
+                else:  # month
+                    # 한달: 주간별 집계 (daily_user_api_stats 사용)
+                    total_sql = f"""
+                        SELECT 
+                            YEARWEEK(date, 3) AS yw,
+                            MIN(date) AS week_start,
+                            COALESCE(SUM(total_requests), 0) as total,
+                            COALESCE(SUM(successful_requests), 0) as success,
+                            COALESCE(SUM(failed_requests), 0) as failed
+                        FROM daily_user_api_stats
+                        WHERE user_id = %s AND {get_date_filter(period, "daily_user_api_stats")} {api_type_filter}
+                        GROUP BY YEARWEEK(date, 3)
+                        ORDER BY yw
+                    """
+                    cursor.execute(total_sql, [user_id] + api_type_params)
+                    rows = cursor.fetchall() or []
+                    
+                    chart_data = []
+                    for row in rows:
+                        week_start = row['week_start']
+                        month = week_start.month
+                        day = week_start.day
+                        week_in_month = ((day - 1) // 7) + 1
+                        label = f"{month}월 {week_in_month}주차"
+                        
+                        chart_data.append({
+                            "label": label,
+                            "requests": int(row['total'] or 0),
+                            "success": int(row['success'] or 0),
+                            "failed": int(row['failed'] or 0)
+                        })
+
                 
                 return {
                     "success": True,
