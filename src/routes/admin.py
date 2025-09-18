@@ -417,7 +417,7 @@ def delete_user(
     request: Request,
     admin_user = Depends(require_admin)
 ):
-    """사용자 삭제 (비활성화)"""
+    """사용자 하드 삭제"""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -425,19 +425,19 @@ def delete_user(
                 if admin_user['id'] == user_id:
                     raise HTTPException(status_code=400, detail="자기 자신은 삭제할 수 없습니다.")
                 
-                # 사용자 존재 확인
-                cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-                if not cursor.fetchone():
-                    raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-                
-                # 비활성화 (실제 삭제 대신)
-                cursor.execute("UPDATE users SET is_active = FALSE WHERE id = %s", (user_id,))
+                # 실제 삭제 수행
+                cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+                affected = cursor.rowcount or 0
                 conn.commit()
-                
-                return {"success": True, "message": "사용자가 비활성화되었습니다."}
+                if affected == 0:
+                    raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+                return {"success": True, "deleted": affected}
     except HTTPException:
         raise
     except Exception as e:
+        msg = str(e)
+        if "foreign key" in msg.lower() or "constraint" in msg.lower():
+            raise HTTPException(status_code=409, detail="연관 데이터로 인해 삭제할 수 없습니다.")
         raise HTTPException(status_code=500, detail=f"사용자 삭제 실패: {e}")
 
 # ==================== 요금제 관리 API ====================
