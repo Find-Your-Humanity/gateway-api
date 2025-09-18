@@ -51,7 +51,19 @@ def list_users(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    return {"success": True, "data": users, "total": total, "page": page, "pageSize": limit}
+    pages = (total + limit - 1) // limit if limit else 1
+    return {
+        "success": True,
+        "data": {
+            "data": users,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "pages": pages,
+            },
+        },
+    }
 
 
 @router.put("/api/admin/users/{user_id}")
