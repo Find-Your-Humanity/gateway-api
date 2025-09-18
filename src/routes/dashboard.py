@@ -59,14 +59,28 @@ def get_dashboard_analytics(request: Request, current_user = Depends(require_aut
                         us.current_usage,
                         us.last_reset_at
                     FROM users u
-                    LEFT JOIN user_subscriptions us ON u.id = us.user_id
-                    LEFT JOIN plans p ON us.plan_id = p.id
-                    WHERE u.id = %s AND us.status = 'active'
+                    LEFT JOIN user_subscriptions us ON u.id = us.user_id AND us.status = 'active'
+                    LEFT JOIN plans p ON (
+                        (us.plan_id IS NOT NULL AND p.id = us.plan_id) OR
+                        (us.plan_id IS NULL AND p.id = u.plan_id)
+                    )
+                    WHERE u.id = %s
                 """, (user_id,))
                 
                 plan_info = cursor.fetchone()
                 if not plan_info:
-                    raise HTTPException(status_code=404, detail="사용자 플랜 정보를 찾을 수 없습니다")
+                    # 폴백: 기본 free 플랜 값으로 응답 구성
+                    plan_info = {
+                        'user_id': user_id,
+                        'email': current_user.get('email'),
+                        'plan_id': None,
+                        'plan_name': 'free',
+                        'display_name': 'Free',
+                        'monthly_request_limit': 30000,
+                        'rate_limit_per_minute': 60,
+                        'current_usage': 0,
+                        'last_reset_at': None,
+                    }
                 
                 # 2. 이번 달 API 사용량 조회 (캡차 타입별) - 월간 구독 서비스에 맞게 변경
                 today = datetime.now().date()
