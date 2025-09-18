@@ -139,7 +139,7 @@ def get_user_stats_overview(
                 date_filter_condition = get_date_filter(period, "request_logs")
                 peak_query = f"""
                     SELECT 
-                        DATE_FORMAT(DATE(request_time), '%%Y-%%m-%%d') as peak_date,
+                        DATE(request_time) as peak_date,
                         COUNT(*) as daily_total
                     FROM request_logs
                     WHERE user_id = %s
