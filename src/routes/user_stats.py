@@ -49,15 +49,16 @@ def get_date_filter(period: str, table_name: str = "daily_user_api_stats") -> st
         else:
             return "date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"  # 기본값: 한달
     else:
-        # api_request_logs 테이블은 created_at 컬럼 사용
+        # request_logs는 request_time 컬럼 사용
+        time_col = "request_time"
         if period == "today":
-            return f"DATE({table_name}.created_at) = CURDATE()"
+            return f"DATE({table_name}.{time_col}) = CURDATE()"
         elif period == "week":
-            return f"{table_name}.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+            return f"{table_name}.{time_col} >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
         elif period == "month":
-            return f"{table_name}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+            return f"{table_name}.{time_col} >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
         else:
-            return f"{table_name}.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)"  # 기본값: 한달
+            return f"{table_name}.{time_col} >= DATE_SUB(NOW(), INTERVAL 30 DAY)"  # 기본값: 한달
 
 @router.get("/user/stats/overview")
 def get_user_stats_overview(
@@ -78,15 +79,17 @@ def get_user_stats_overview(
         
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # 1. 전체 통계 (모든 API 키 합계) - daily_user_api_stats 테이블 사용
+                # 1. 전체 통계 (세 verify 엔드포인트만) - request_logs 테이블 사용
                 overview_query = f"""
                     SELECT 
-                        COALESCE(SUM(total_requests), 0) as total_requests,
-                        COALESCE(SUM(successful_requests), 0) as success_requests,
-                        COALESCE(SUM(failed_requests), 0) as failed_requests,
-                        COALESCE(AVG(avg_response_time), 0.0) as avg_response_time
-                    FROM daily_user_api_stats
-                    WHERE user_id = %s AND {get_date_filter(period, "daily_user_api_stats")}
+                        COUNT(*) AS total_requests,
+                        SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
+                        SUM(CASE WHEN status_code IN (400, 500) THEN 1 ELSE 0 END) AS failed_requests,
+                        COALESCE(AVG(response_time), 0.0) AS avg_response_time
+                    FROM request_logs
+                    WHERE user_id = %s
+                      AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                      AND {get_date_filter(period, "request_logs")}
                 """
                 cursor.execute(overview_query, (user_id,))
                 overview = cursor.fetchone()
@@ -107,17 +110,23 @@ def get_user_stats_overview(
                         }
                     }
                 
-                # 2. 캡차 타입별 통계 - daily_user_api_stats 테이블 사용
+                # 2. 캡차 타입별 통계 - request_logs 테이블 사용 (세 verify 엔드포인트만 집계)
                 type_query = f"""
                     SELECT 
-                        COALESCE(api_type, 'unknown') as captcha_type,
-                        COALESCE(SUM(total_requests), 0) as total_requests,
-                        COALESCE(SUM(successful_requests), 0) as success_requests,
-                        COALESCE(SUM(failed_requests), 0) as failed_requests,
-                        COALESCE(AVG(avg_response_time), 0.0) as avg_response_time
-                    FROM daily_user_api_stats
-                    WHERE user_id = %s AND {get_date_filter(period)}
-                    GROUP BY api_type
+                        CASE 
+                          WHEN path = '/api/imagecaptcha-verify' THEN 'imagecaptcha'
+                          WHEN path = '/api/abstract-verify' THEN 'abstract'
+                          WHEN path = '/api/handwriting-verify' THEN 'handwriting'
+                        END AS captcha_type,
+                        COUNT(*) AS total_requests,
+                        SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS success_requests,
+                        SUM(CASE WHEN status_code IN (400, 500) THEN 1 ELSE 0 END) AS failed_requests,
+                        COALESCE(AVG(response_time), 0.0) AS avg_response_time
+                    FROM request_logs
+                    WHERE user_id = %s
+                      AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                      AND {get_date_filter(period, "request_logs")}
+                    GROUP BY captcha_type
                     ORDER BY total_requests DESC
                 """
                 cursor.execute(type_query, (user_id,))
@@ -126,15 +135,17 @@ def get_user_stats_overview(
                 # 성공률 계산
                 success_rate = (overview['success_requests'] / overview['total_requests'] * 100) if overview['total_requests'] > 0 else 0
                 
-                # 3. 최고 일일 요청수 조회
-                date_filter_condition = get_date_filter(period)
+                # 3. 최고 일일 요청수 조회 - request_logs 기준
+                date_filter_condition = get_date_filter(period, "request_logs")
                 peak_query = f"""
                     SELECT 
-                        DATE_FORMAT(date, '%%Y-%%m-%%d') as peak_date,
-                        SUM(total_requests) as daily_total
-                    FROM daily_user_api_stats
-                    WHERE user_id = %s AND {date_filter_condition}
-                    GROUP BY date
+                        DATE_FORMAT(DATE(request_time), '%%Y-%%m-%%d') as peak_date,
+                        COUNT(*) as daily_total
+                    FROM request_logs
+                    WHERE user_id = %s
+                      AND path IN ('/api/imagecaptcha-verify','/api/abstract-verify','/api/handwriting-verify')
+                      AND {date_filter_condition}
+                    GROUP BY DATE(request_time)
                     ORDER BY daily_total DESC
                     LIMIT 1
                 """
@@ -144,7 +155,7 @@ def get_user_stats_overview(
                 peak_daily_requests = int(peak_result['daily_total'] or 0) if peak_result else 0
                 peak_date = peak_result['peak_date'] if peak_result else None
                 
-                # 캡차 타입별 통계 포맷팅
+                # 캡차 타입별 통계 포맷팅 + pass(행동분석 통과) 100% 고정 항목 추가
                 captcha_types = []
                 for stat in type_stats:
                     type_success_rate = (stat['success_requests'] / stat['total_requests'] * 100) if stat['total_requests'] > 0 else 0
@@ -156,6 +167,16 @@ def get_user_stats_overview(
                         "success_rate": round(type_success_rate, 2),
                         "avg_response_time": round(float(stat['avg_response_time'] or 0), 2)
                     })
+
+                # 행동분석 통과 카테고리 추가 (항상 100%)
+                captcha_types.append({
+                    "captcha_type": "pass",
+                    "total_requests": 0,
+                    "success_requests": 0,
+                    "failed_requests": 0,
+                    "success_rate": 100.0,
+                    "avg_response_time": 0.0
+                })
                 
                 return {
                     "success": True,
