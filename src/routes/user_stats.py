@@ -155,10 +155,10 @@ def get_user_stats_overview(
                     WHERE user_id = %s
                       AND api_type IN ('imagecaptcha','abstract','handwriting')
                       AND {get_date_filter(period, "request_logs")}
-                      AND (path LIKE '%verify%')
+                      AND path LIKE %s
                     GROUP BY api_type
                 """
-                cursor.execute(logs_type_ratio_query, (user_id,))
+                cursor.execute(logs_type_ratio_query, (user_id, "%verify%"))
                 rows = cursor.fetchall() or []
                 type_to_ratio: Dict[str, Dict[str, int]] = {}
                 for r in rows:
@@ -198,9 +198,9 @@ def get_user_stats_overview(
                     WHERE user_id = %s
                       AND api_type IN ('handwriting','abstract','imagecaptcha')
                       AND {get_date_filter(period, "request_logs")}
-                      AND (path LIKE '%verify%')
+                      AND path LIKE %s
                 """
-                cursor.execute(success_ratio_query, (user_id,))
+                cursor.execute(success_ratio_query, (user_id, "%verify%"))
                 ratio_row = cursor.fetchone() or {"success_requests": 0, "total_requests": 0}
                 success_rate = (ratio_row["success_requests"] / ratio_row["total_requests"] * 100) if ratio_row["total_requests"] > 0 else 0
                 
@@ -327,9 +327,9 @@ def get_user_stats_by_api_key(
                         WHERE user_id = %s AND api_key = %s
                           AND api_type IN ('imagecaptcha','abstract','handwriting')
                           AND {get_date_filter(period, "request_logs")}
-                          AND (path LIKE '%verify%')
+                          AND path LIKE %s
                     """
-                    cursor.execute(key_success_ratio_query, (user_id, key_id))
+                    cursor.execute(key_success_ratio_query, (user_id, key_id, "%verify%"))
                     key_ratio = cursor.fetchone() or {"success_requests": 0, "total_requests": 0}
                     if (key_ratio.get("total_requests") or 0) > 0:
                         success_rate = (key_ratio["success_requests"] / key_ratio["total_requests"] * 100)
@@ -347,10 +347,10 @@ def get_user_stats_by_api_key(
                         WHERE user_id = %s AND api_key = %s
                           AND api_type IN ('imagecaptcha','abstract','handwriting')
                           AND {get_date_filter(period, "request_logs")}
-                          AND (path LIKE '%verify%')
+                          AND path LIKE %s
                         GROUP BY api_type
                     """
-                    cursor.execute(key_logs_type_ratio_query, (user_id, key_id))
+                    cursor.execute(key_logs_type_ratio_query, (user_id, key_id, "%verify%"))
                     key_type_rows = cursor.fetchall() or []
                     type_ratio_map: Dict[str, Dict[str, int]] = {}
                     for r in key_type_rows:
