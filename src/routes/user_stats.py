@@ -134,7 +134,7 @@ def get_user_stats_overview(
                         COUNT(*) as daily_total
                     FROM api_request_logs
                     WHERE user_id = %s AND {date_filter_condition}
-                    GROUP BY DATE(created_at)
+                    GROUP BY DATE_FORMAT(created_at, '%%Y-%%m-%%d')
                     ORDER BY daily_total DESC
                     LIMIT 1
                 """
@@ -337,17 +337,17 @@ def get_user_stats_time_series(
                     # 오늘은 시간별 집계
                     date_format = "%H:00"
                     date_filter = get_date_filter("today", "api_request_logs")
-                    group_by = "HOUR(created_at)"
+                    group_by = "DATE_FORMAT(created_at, '%H:00')"
                 elif period == "week":
                     # 주간은 일별 집계
                     date_format = "%Y-%m-%d"
                     date_filter = get_date_filter("week", "api_request_logs")
-                    group_by = "DATE(created_at)"
+                    group_by = "DATE_FORMAT(created_at, '%Y-%m-%d')"
                 else:  # month
                     # 월간은 일별 집계
                     date_format = "%Y-%m-%d"
                     date_filter = get_date_filter("month", "api_request_logs")
-                    group_by = "DATE(created_at)"
+                    group_by = "DATE_FORMAT(created_at, '%Y-%m-%d')"
                 
                 # API 키 필터 추가
                 api_key_filter = ""
@@ -365,8 +365,8 @@ def get_user_stats_time_series(
                         COALESCE(AVG(response_time), 0.0) as avg_response_time
                     FROM api_request_logs
                     WHERE user_id = %s AND {date_filter} {api_key_filter}
-                    GROUP BY {group_by}
-                    ORDER BY {group_by}
+                    GROUP BY DATE_FORMAT(created_at, '{date_format}')
+                    ORDER BY DATE_FORMAT(created_at, '{date_format}')
                 """
                 
                 cursor.execute(time_series_query, params)
