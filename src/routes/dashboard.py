@@ -474,15 +474,15 @@ def get_user_key_stats(
 
                         # 데이터가 있는 경우만 결과에 추가
                         if total > 0 or success > 0 or failed > 0:
-                        rate = round((success / total) * 100, 1) if total else 0.0
-                        results.append({
-                            "totalRequests": total,
-                            "successfulSolves": success,
-                            "failedAttempts": failed,
-                            "successRate": rate,
-                            "averageResponseTime": 0,
+                            rate = round((success / total) * 100, 1) if total else 0.0
+                            results.append({
+                                "totalRequests": total,
+                                "successfulSolves": success,
+                                "failedAttempts": failed,
+                                "successRate": rate,
+                                "averageResponseTime": 0,
                                 "date": d_str,
-                        })
+                            })
 
                 elif period == "weekly":
                     start_date = today - timedelta(days=28)
