@@ -569,7 +569,7 @@ def get_user_key_stats(
                         month = week_start.month
                         day = week_start.day
                         week_in_month = ((day - 1) // 7) + 1
-                            label = f"{month}월 {week_in_month}주차"
+                        label = f"{month}월 {week_in_month}주차"
 
                         day_totals = {k: v for k, v in data.items() if k != 'week_start'}
                         day_results = result_data.get(yw, {})
