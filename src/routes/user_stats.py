@@ -31,6 +31,7 @@ class ApiKeyStats(BaseModel):
     success_rate: float
     avg_response_time: float
     captcha_types: List[CaptchaTypeStats]
+    is_active: Optional[bool] = None
 
 class UserStatsResponse(BaseModel):
     success: bool
@@ -62,7 +63,8 @@ def get_date_filter(period: str, table_name: str = "daily_user_api_stats") -> st
 @router.get("/user/stats/overview")
 def get_user_stats_overview(
     request: Request,
-    period: str = Query("month", description="통계 기간: today, week, month")
+    period: str = Query("month", description="통계 기간: today, week, month"),
+    include_inactive_deleted: bool = Query(False, description="비활성+삭제 키 포함 여부")
 ):
     """사용자 통계 개요 조회 (전체 합계)"""
     try:
@@ -79,16 +81,31 @@ def get_user_stats_overview(
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 # 1. 전체 통계 (모든 API 키 합계) - api_request_logs 테이블에서 실시간 계산
-                overview_query = f"""
-                    SELECT 
-                        COUNT(*) as total_requests,
-                        SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
-                        SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
-                        COALESCE(AVG(response_time), 0.0) as avg_response_time
-                    FROM api_request_logs
-                    WHERE user_id = %s AND {get_date_filter(period, "api_request_logs")}
-                """
-                cursor.execute(overview_query, (user_id,))
+                if include_inactive_deleted:
+                    # 비활성화/삭제된 키 포함하여 모든 요청 조회
+                    overview_query = f"""
+                        SELECT 
+                            COUNT(*) as total_requests,
+                            SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
+                            SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
+                            COALESCE(AVG(response_time), 0.0) as avg_response_time
+                        FROM api_request_logs
+                        WHERE user_id = %s AND {get_date_filter(period, "api_request_logs")}
+                    """
+                    cursor.execute(overview_query, (user_id,))
+                else:
+                    # 활성 키만 조회
+                    overview_query = f"""
+                        SELECT 
+                            COUNT(*) as total_requests,
+                            SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
+                            SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
+                            COALESCE(AVG(response_time), 0.0) as avg_response_time
+                        FROM api_request_logs arl
+                        JOIN api_keys ak ON arl.api_key = ak.key_id
+                        WHERE arl.user_id = %s AND ak.is_active = 1 AND {get_date_filter(period, "api_request_logs")}
+                    """
+                    cursor.execute(overview_query, (user_id,))
                 overview = cursor.fetchone()
                 
                 if not overview or overview['total_requests'] == 0:
@@ -108,19 +125,37 @@ def get_user_stats_overview(
                     }
                 
                 # 2. 캡차 타입별 통계 - api_request_logs 테이블에서 실시간 계산
-                type_query = f"""
-                    SELECT 
-                        COALESCE(api_type, 'unknown') as captcha_type,
-                        COUNT(*) as total_requests,
-                        SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
-                        SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
-                        COALESCE(AVG(response_time), 0.0) as avg_response_time
-                    FROM api_request_logs
-                    WHERE user_id = %s AND {get_date_filter(period, "api_request_logs")}
-                    GROUP BY api_type
-                    ORDER BY total_requests DESC
-                """
-                cursor.execute(type_query, (user_id,))
+                if include_inactive_deleted:
+                    # 비활성화/삭제된 키 포함하여 모든 요청 조회
+                    type_query = f"""
+                        SELECT 
+                            COALESCE(api_type, 'unknown') as captcha_type,
+                            COUNT(*) as total_requests,
+                            SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
+                            SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
+                            COALESCE(AVG(response_time), 0.0) as avg_response_time
+                        FROM api_request_logs
+                        WHERE user_id = %s AND {get_date_filter(period, "api_request_logs")}
+                        GROUP BY api_type
+                        ORDER BY total_requests DESC
+                    """
+                    cursor.execute(type_query, (user_id,))
+                else:
+                    # 활성 키만 조회
+                    type_query = f"""
+                        SELECT 
+                            COALESCE(api_type, 'unknown') as captcha_type,
+                            COUNT(*) as total_requests,
+                            SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) as success_requests,
+                            SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) as failed_requests,
+                            COALESCE(AVG(response_time), 0.0) as avg_response_time
+                        FROM api_request_logs arl
+                        JOIN api_keys ak ON arl.api_key = ak.key_id
+                        WHERE arl.user_id = %s AND ak.is_active = 1 AND {get_date_filter(period, "api_request_logs")}
+                        GROUP BY api_type
+                        ORDER BY total_requests DESC
+                    """
+                    cursor.execute(type_query, (user_id,))
                 type_stats = cursor.fetchall()
                 
                 # 성공률 계산
@@ -128,17 +163,33 @@ def get_user_stats_overview(
                 
                 # 3. 최고 일일 요청수 조회 - api_request_logs 테이블에서 실시간 계산
                 date_filter_condition = get_date_filter(period, "api_request_logs")
-                peak_query = f"""
-                    SELECT 
-                        DATE_FORMAT(created_at, '%%Y-%%m-%%d') as peak_date,
-                        COUNT(*) as daily_total
-                    FROM api_request_logs
-                    WHERE user_id = %s AND {date_filter_condition}
-                    GROUP BY DATE_FORMAT(created_at, '%%Y-%%m-%%d')
-                    ORDER BY daily_total DESC
-                    LIMIT 1
-                """
-                cursor.execute(peak_query, (user_id,))
+                if include_inactive_deleted:
+                    # 비활성화/삭제된 키 포함하여 모든 요청 조회
+                    peak_query = f"""
+                        SELECT 
+                            DATE_FORMAT(created_at, '%%Y-%%m-%%d') as peak_date,
+                            COUNT(*) as daily_total
+                        FROM api_request_logs
+                        WHERE user_id = %s AND {date_filter_condition}
+                        GROUP BY DATE_FORMAT(created_at, '%%Y-%%m-%%d')
+                        ORDER BY daily_total DESC
+                        LIMIT 1
+                    """
+                    cursor.execute(peak_query, (user_id,))
+                else:
+                    # 활성 키만 조회
+                    peak_query = f"""
+                        SELECT 
+                            DATE_FORMAT(arl.created_at, '%%Y-%%m-%%d') as peak_date,
+                            COUNT(*) as daily_total
+                        FROM api_request_logs arl
+                        JOIN api_keys ak ON arl.api_key = ak.key_id
+                        WHERE arl.user_id = %s AND ak.is_active = 1 AND {date_filter_condition}
+                        GROUP BY DATE_FORMAT(arl.created_at, '%%Y-%%m-%%d')
+                        ORDER BY daily_total DESC
+                        LIMIT 1
+                    """
+                    cursor.execute(peak_query, (user_id,))
                 peak_result = cursor.fetchone()
                 
                 peak_daily_requests = int(peak_result['daily_total'] or 0) if peak_result else 0
@@ -296,7 +347,8 @@ def get_user_stats_by_api_key(
                         "failed_requests": failed_requests,
                         "success_rate": round(success_rate, 2),
                         "avg_response_time": round(avg_response_time, 2),
-                        "captcha_types": captcha_types
+                        "captcha_types": captcha_types,
+                        "is_active": api_key.get('is_active', None)
                     })
                 
                 return {
